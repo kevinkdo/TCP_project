@@ -15,7 +15,8 @@
 
 #include "rlib.h"
 
-
+#define PACKET_SIZE 500
+#define HEADER_SIZE 12
 
 struct reliable_state {
   rel_t *next;			/* Linked list for traversing all connections */
@@ -96,12 +97,43 @@ rel_demux (const struct config_common *cc,
 void
 rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 {
+  if (n >= 12) {
+    //Print packet data
+    char data[PACKET_SIZE];
+    memcpy((void*) &data, (void*) pkt->data, n);
+    int i;
+    for (i=0; i < n-12; i++) {
+      printf("%c", (int) data[i]);
+    }
+    fflush(stdout);
+  }
 }
 
 
 void
 rel_read (rel_t *s)
 {
+  //Prepare packet
+  packet_t to_send;
+  to_send.cksum = 0xFFFF;//TODO
+  to_send.ackno = 0xEEEEEEEE;//TODO
+  to_send.seqno = 0;//TODO
+
+  //Get user input
+  int conn_input_return = conn_input (s->c, (void*) to_send.data, PACKET_SIZE-HEADER_SIZE);
+  to_send.len = conn_input_return;
+  printf("to_send.data: %s", to_send.data);
+
+  //Send packet
+  if (conn_input_return > -1) {
+    conn_sendpkt (s->c, &to_send, 12 + conn_input_return);
+  }
+  else if (conn_input_return == 0) {
+    //no data currently available
+  }
+  else if (conn_input_return == -1) {
+    //EOF or error
+  }
 }
 
 void
