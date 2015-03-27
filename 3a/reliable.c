@@ -19,7 +19,6 @@
 #define PACKET_SIZE 500
 #define HEADER_SIZE 12
 
-
 struct reliable_state {
   rel_t *next;			/* Linked list for traversing all connections */
   rel_t **prev;
@@ -96,6 +95,29 @@ rel_demux (const struct config_common *cc,
 	   const struct sockaddr_storage *ss,
 	   packet_t *pkt, size_t len)
 {
+	/* demultiplex called when in server mode,
+	 * if seq == 1 from a new sockaddr_storage, invoke rel_create
+	 *  else
+	 */
+	int is_new = 1;
+	rel_t *curr = rel_list;
+
+	while(curr){
+		conn_t * c = curr->c;
+		if( (pkt->seqno != 1) && addreq( ss, &( c->peer ) )){
+			//is existing connection
+			is_new = 0;
+
+			rel_recvpkt(curr, pkt, len);
+		}
+		curr = curr -> next;
+	}
+	if (is_new){
+		//create new rel_t and receive
+		rel_t * r = rel_create(NULL, ss, cc);
+		rel_recvpkt(r, pkt, len);
+	}
+
 }
 
 void
