@@ -15,8 +15,10 @@
 
 #include "rlib.h"
 
+#define ACK_SIZE 8
 #define PACKET_SIZE 500
 #define HEADER_SIZE 12
+
 
 struct reliable_state {
   rel_t *next;			/* Linked list for traversing all connections */
@@ -25,11 +27,11 @@ struct reliable_state {
   conn_t *c;			/* This is the connection object */
 
   /* Add your own data fields below this */
-
+  int next_in_seq;
+  int next_out_seq;
+  int last_ack;
 };
 rel_t *rel_list;
-
-
 
 
 
@@ -62,7 +64,9 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
   rel_list = r;
 
   /* Do any other initialization you need here */
-
+  r->next_out_seq = 1;
+  r->next_in_seq = 1;
+  r->last_ack = -1;
 
   return r;
 }
@@ -97,15 +101,24 @@ rel_demux (const struct config_common *cc,
 void
 rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 {
-  if (n >= 12) {
+  if (n == ACK_SIZE) {
+    struct ack_packet* recvd_ack = (struct ack_packet*) pkt;
+    r->last_ack = recvd_ack->ackno;
+  }
+  if (n >= HEADER_SIZE && pkt->seqno == r->next_in_seq) {
     //Print packet data
-    char data[PACKET_SIZE];
-    memcpy((void*) &data, (void*) pkt->data, n);
     int i;
-    for (i=0; i < n-HEADER_SIZE; i++) {
-      printf("%c", (int) data[i]);
-    }
-    fflush(stdout);
+    conn_output(r->c, (void*) pkt->data, n - HEADER_SIZE);
+    r->next_in_seq++;
+
+    //Construct ack
+    struct ack_packet sent_ack;
+    sent_ack.cksum = 0xFFFF;//TODO
+    sent_ack.len = ACK_SIZE;
+    sent_ack.ackno = r->next_in_seq;
+
+    //Send ack
+    conn_sendpkt (r->c, (packet_t*) &sent_ack, ACK_SIZE);
   }
 }
 
@@ -116,16 +129,16 @@ rel_read (rel_t *s)
   //Prepare packet
   packet_t to_send;
   to_send.cksum = 0xFFFF;//TODO
-  to_send.ackno = 0xEEEEEEEE;//TODO
-  to_send.seqno = 0;//TODO
-
+  to_send.ackno = s->next_in_seq;
+  to_send.seqno = s->next_out_seq;
+  
   //Get user input
   int conn_input_return = conn_input (s->c, (void*) to_send.data, PACKET_SIZE-HEADER_SIZE);
   to_send.len = conn_input_return;
 
   //Send packet
   if (conn_input_return > -1) {
-    conn_sendpkt (s->c, &to_send, HEADER_SIZE + conn_input_return);
+      conn_sendpkt (s->c, &to_send, HEADER_SIZE + conn_input_return);
   }
   else if (conn_input_return == 0) {
     //no data currently available
@@ -133,6 +146,9 @@ rel_read (rel_t *s)
   else if (conn_input_return == -1) {
     //EOF or error
   }
+
+  //Increment sequence number
+  s->next_out_seq++;
 }
 
 void
@@ -144,5 +160,4 @@ void
 rel_timer ()
 {
   /* Retransmit any packets that need to be retransmitted */
-
 }
