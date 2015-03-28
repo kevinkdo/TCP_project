@@ -127,8 +127,20 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
   }
   if (n >= HEADER_SIZE && pkt->seqno == r->next_in_seq) {
     //Print packet data
-    int i;
-    conn_output(r->c, (void*) pkt->data, n - HEADER_SIZE);
+    int conn_output_return;
+    conn_output_return = conn_output(r->c, (void*) pkt->data, n - HEADER_SIZE);
+
+    if (conn_output_return > 0 && conn_output_return < n-HEADER_SIZE){
+    	// call conn_output again, passing in portion of the message did not write the first time
+
+    }
+    else if (conn_output_return == 0 ){
+    	//EOF sent
+    }
+    else if (conn_output_return == -1 ){
+    	//error
+    }
+
     r->next_in_seq++;
 
     //Construct ack
@@ -162,9 +174,11 @@ rel_read (rel_t *s)
   }
   else if (conn_input_return == 0) {
     //no data currently available
+	  return;
   }
   else if (conn_input_return == -1) {
     //EOF or error
+	  return;
   }
 
   //Increment sequence number
@@ -174,6 +188,7 @@ rel_read (rel_t *s)
 void
 rel_output (rel_t *r)
 {
+
 }
 
 void
