@@ -131,7 +131,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
     conn_output_return = conn_output(r->c, (void*) pkt->data, n - HEADER_SIZE);
 
     if (conn_output_return > 0 && conn_output_return < n-HEADER_SIZE){
-    	// call conn_output again, passing in portion of the message did not write the first time
+    	// TODO: call conn_output again, passing in portion of the message did not write the first time
 
     }
     else if (conn_output_return == 0 ){
@@ -194,5 +194,6 @@ rel_output (rel_t *r)
 void
 rel_timer ()
 {
-  /* Retransmit any packets that need to be retransmitted */
+  /* Retransmit any packets that need to be retransmitted
+   * */
 }
