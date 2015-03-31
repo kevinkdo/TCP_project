@@ -380,7 +380,6 @@ conn_drain (conn_t *c)
   }
   if (didsome && !c->delete_me)
     rel_output (c->rel);
-  printf("calling rel_output");
 }
 
 static void

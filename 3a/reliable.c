@@ -12,6 +12,8 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <netinet/in.h>
+#include <stdbool.h>
+#include <sys/queue.h>
 
 #include "rlib.h"
 
@@ -32,7 +34,34 @@ struct reliable_state {
 };
 rel_t *rel_list;
 
+//Keeps track of packets sent out and waiting for acks
+typedef struct out_pkt {
+  rel_t *r;
+  packet_t *pkt;
+  int seqno;
+  size_t size;
+  struct out_pkt *next;
+} out_pkt_t;
+out_pkt_t *out_list_head = NULL;
 
+void add_to_out_list(rel_t* r, packet_t *pkt, int seqno, size_t size) {
+  out_pkt_t *to_add = (out_pkt_t*) malloc(sizeof(out_pkt_t));
+  to_add->r = r;
+  to_add->pkt = pkt;
+  to_add->seqno = seqno;
+  to_add->size = size;
+  to_add->next = NULL;
+
+  if (out_list_head == NULL) {
+    out_list_head = to_add;
+  }
+  else {
+    out_pkt_t* temp = out_list_head;
+    while (temp->next != NULL)
+      temp = temp->next;
+    temp->next = to_add;
+  }
+}
 
 /* Creates a new reliable protocol session, returns NULL on failure.
  * Exactly one of c and ss should be NULL.  (ss is NULL when called
@@ -159,18 +188,19 @@ void
 rel_read (rel_t *s)
 {
   //Prepare packet
-  packet_t to_send;
-  to_send.cksum = 0xFFFF;//TODO
-  to_send.ackno = s->next_in_seq;
-  to_send.seqno = s->next_out_seq;
+  packet_t *to_send = (packet_t*) malloc(sizeof(packet_t));
+  to_send->cksum = 0xFFFF;//TODO
+  to_send->ackno = s->next_in_seq;
+  to_send->seqno = s->next_out_seq;
   
   //Get user input
-  int conn_input_return = conn_input (s->c, (void*) to_send.data, PACKET_SIZE-HEADER_SIZE);
-  to_send.len = conn_input_return;
+  int conn_input_return = conn_input (s->c, (void*) to_send->data, PACKET_SIZE-HEADER_SIZE);
+  to_send->len = conn_input_return;
 
   //Send packet
   if (conn_input_return > -1) {
-      conn_sendpkt (s->c, &to_send, HEADER_SIZE + conn_input_return);
+      conn_sendpkt (s->c, to_send, HEADER_SIZE + conn_input_return);
+      add_to_out_list(s, to_send, to_send->seqno, HEADER_SIZE + conn_input_return);
   }
   else if (conn_input_return == 0) {
     //no data currently available
@@ -196,4 +226,11 @@ rel_timer ()
 {
   /* Retransmit any packets that need to be retransmitted
    * */
+  out_pkt_t *temp = out_list_head;
+  while (temp != NULL) {
+    if (temp->seqno >= temp->r->last_ack) {
+      conn_sendpkt (temp->r->c, temp->pkt, temp->size);
+    }
+    temp = temp->next;
+  }
 }
