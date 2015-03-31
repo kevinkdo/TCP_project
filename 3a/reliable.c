@@ -159,9 +159,25 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 {
     if (n == ACK_SIZE) {
         struct ack_packet* recvd_ack = (struct ack_packet*) pkt;
+
+        // Verify checksum; abort if necessary
+        uint16_t cksum_recv = recvd_ack->cksum;
+        recvd_ack->cksum = 0;
+        uint16_t cksum_calc = cksum ((void*) recvd_ack, n);
+        if (cksum_recv != cksum_calc)
+            return;
+
+        // Update last_ack
         r->last_ack = recvd_ack->ackno;
     }
     if (n >= HEADER_SIZE && pkt->seqno == r->next_in_seq) {
+        // Verify checksum; abort if necessary
+        uint16_t cksum_recv = pkt->cksum;
+        pkt->cksum = 0;
+        uint16_t cksum_calc = cksum ((void*) pkt, n);
+        if (cksum_recv != cksum_calc)
+            return;
+
         //Print packet data
         int conn_output_return;
         conn_output_return = conn_output(r->c, (void*) pkt->data, n - HEADER_SIZE);
@@ -181,9 +197,10 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 
         //Construct ack
         struct ack_packet sent_ack;
-        sent_ack.cksum = 0xFFFF;//TODO
+        sent_ack.cksum = 0x0000;
         sent_ack.len = ACK_SIZE;
         sent_ack.ackno = r->next_in_seq;
+        sent_ack.cksum = cksum ((void*) &sent_ack, ACK_SIZE);
 
         //Send ack
         conn_sendpkt (r->c, (packet_t*) &sent_ack, ACK_SIZE);
@@ -197,13 +214,16 @@ rel_read (rel_t *s)
 {
     //Prepare packet
     packet_t *to_send = (packet_t*) malloc(sizeof(packet_t));
-    to_send->cksum = 0xFFFF;//TODO
+    to_send->cksum = 0x0000;
     to_send->ackno = s->next_in_seq;
     to_send->seqno = s->next_out_seq;
     
     //Get user input
     int conn_input_return = conn_input (s->c, (void*) to_send->data, PACKET_SIZE-HEADER_SIZE);
     to_send->len = conn_input_return;
+
+    //Calculate checksum
+    to_send->cksum = cksum ((void*) to_send, HEADER_SIZE + conn_input_return);
 
     //Send packet
     if (conn_input_return > -1) {
