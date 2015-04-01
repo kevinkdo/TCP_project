@@ -179,12 +179,11 @@ rel_demux (const struct config_common *cc,
 }
 
 // Process a received packet
-// TODO You must examine the length field, and should not assume that the UDP packet you receive is the correct length
 // TODO When n = HEADER_SIZE, consider that an EOF condition.
 void
 rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 {
-    if (n == ACK_SIZE) {
+    if (pkt->len == ACK_SIZE) {
         struct ack_packet* recvd_ack = (struct ack_packet*) pkt;
 
         // Verify checksum; abort if necessary
@@ -197,7 +196,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
         // Update last_ack
         r->last_ack = recvd_ack->ackno;
     }
-    if (n >= HEADER_SIZE && pkt->seqno == r->next_in_seq) {
+    if (pkt->len >= HEADER_SIZE && pkt->seqno == r->next_in_seq) {
         // Verify checksum; abort if necessary
         uint16_t cksum_recv = pkt->cksum;
         pkt->cksum = 0;
@@ -247,7 +246,7 @@ rel_read (rel_t *s)
     
     //Get user input
     int conn_input_return = conn_input (s->c, (void*) to_send->data, PACKET_SIZE-HEADER_SIZE);
-    to_send->len = conn_input_return;
+    to_send->len = conn_input_return + HEADER_SIZE;
 
     //Calculate checksum
     to_send->cksum = cksum ((void*) to_send, HEADER_SIZE + conn_input_return);
