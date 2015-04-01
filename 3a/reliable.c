@@ -50,11 +50,34 @@ typedef struct out_pkt {
     struct out_pkt *next;       // linked list node
 } out_pkt_t;
 
+// Struct for received packets
+typedef struct in_pkt {
+    int len;
+    int progress;
+    void *data;
+} in_pkt_t;
+
 /* ===== Global variables ===== */
 rel_t *rel_list;
 out_pkt_t *out_list_head = NULL;
+in_pkt_t in_pkt_buff;
 
 /* ===== Functions ===== */
+void send_ack(rel_t* r) {
+    //Update ackno
+    r->next_in_seq++;
+
+    //Construct ack
+    struct ack_packet sent_ack;
+    sent_ack.cksum = 0x0000;
+    sent_ack.len = ACK_SIZE;
+    sent_ack.ackno = r->next_in_seq;
+    sent_ack.cksum = cksum ((void*) &sent_ack, ACK_SIZE);
+
+    //Send ack
+    conn_sendpkt (r->c, (packet_t*) &sent_ack, ACK_SIZE);
+}
+
 // Returns how much time left (in seconds) until timeout
 long time_until_timeout (const struct timespec *last, long timeout) {
     long to;
@@ -209,31 +232,17 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 
         //Print packet data
         int conn_output_return;
-        conn_output_return = conn_output(r->c, (void*) pkt->data, n - HEADER_SIZE);
+        int curr_bufspace = conn_bufspace(r->c);
 
-        if (conn_output_return > 0 && conn_output_return < n-HEADER_SIZE){
-            // TODO: call conn_output again, passing in portion of the message did not write the first time
-
+        if (curr_bufspace >= n - HEADER_SIZE) {
+            conn_output_return = conn_output(r->c, (void*) pkt->data, n - HEADER_SIZE);
+            send_ack(r);
         }
-        else if (conn_output_return == 0 ) {
-            
+        else {
+            conn_output_return = conn_output(r->c, (void*) pkt->data, n - HEADER_SIZE);
         }
-        else if (conn_output_return == -1 ) {
-            //error
-        }
-
-        //Update ackno
-        r->next_in_seq++;
-
-        //Construct ack
-        struct ack_packet sent_ack;
-        sent_ack.cksum = 0x0000;
-        sent_ack.len = ACK_SIZE;
-        sent_ack.ackno = r->next_in_seq;
-        sent_ack.cksum = cksum ((void*) &sent_ack, ACK_SIZE);
-
-        //Send ack
-        conn_sendpkt (r->c, (packet_t*) &sent_ack, ACK_SIZE);
+        if (conn_output_return == 0) {}
+        if (conn_output_return == -1) {}
     }
 }
 
