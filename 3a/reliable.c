@@ -288,6 +288,7 @@ rel_timer () {
             time_until_timeout(temp->last_try, (long) temp->r->timeout) == 0)
         {
             conn_sendpkt (temp->r->c, temp->pkt, temp->size);
+            clock_gettime(CLOCK_MONOTONIC, temp->last_try);
         }
         temp = temp->next;
     }
