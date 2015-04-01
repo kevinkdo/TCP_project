@@ -70,8 +70,8 @@ void send_ack(rel_t* r) {
     //Construct ack
     struct ack_packet sent_ack;
     sent_ack.cksum = 0x0000;
-    sent_ack.len = ACK_SIZE;
-    sent_ack.ackno = r->next_in_seq;
+    sent_ack.len = htons(ACK_SIZE);
+    sent_ack.ackno = htonl(r->next_in_seq);
     sent_ack.cksum = cksum ((void*) &sent_ack, ACK_SIZE);
 
     //Send ack
@@ -213,20 +213,23 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
     // Verify checksum; abort if necessary
     uint16_t cksum_recv = pkt->cksum;
     pkt->cksum = 0x0000;
-    uint16_t cksum_calc = cksum ((void*) pkt, pkt->len);
-    if (cksum_recv != cksum_calc)
+    uint16_t cksum_calc = cksum ((void*) pkt, ntohs(pkt->len));
+    if (cksum_recv != cksum_calc) {
+        printf("failed chksum");
+        fflush(stdout);
         return;
+    }
 
     //Received ack
-    if (pkt->len == ACK_SIZE) {
+    if (ntohs(pkt->len) == ACK_SIZE) {
         struct ack_packet* recvd_ack = (struct ack_packet*) pkt;
-        r->last_ack = recvd_ack->ackno;
+        r->last_ack = ntohl(recvd_ack->ackno);
     }
 
     //Received data packet
-    if (pkt->len >= HEADER_SIZE && pkt->seqno == r->next_in_seq) {
+    if (ntohs(pkt->len) >= HEADER_SIZE && ntohl(pkt->seqno) == r->next_in_seq) {
         //Received EOF
-        if (pkt->len == HEADER_SIZE) {
+        if (ntohs(pkt->len) == HEADER_SIZE) {
             r->recv_eof = 1;
         }
 
@@ -246,8 +249,8 @@ rel_read (rel_t *s)
     //Prepare packet
     packet_t *to_send = (packet_t*) malloc(sizeof(packet_t));
     to_send->cksum = 0x0000;
-    to_send->ackno = s->next_in_seq;
-    to_send->seqno = s->next_out_seq;
+    to_send->ackno = htonl(s->next_in_seq);
+    to_send->seqno = htonl(s->next_out_seq);
     
     //Get user input
     int conn_input_return = conn_input (s->c, (void*) to_send->data, PACKET_SIZE-HEADER_SIZE);
@@ -255,7 +258,7 @@ rel_read (rel_t *s)
     //User entered data
     if (conn_input_return > -1) {
         //Calculate fields
-        to_send->len = conn_input_return + HEADER_SIZE;
+        to_send->len = htons(conn_input_return + HEADER_SIZE);
         to_send->cksum = cksum ((void*) to_send, HEADER_SIZE + conn_input_return);
 
         //Send if possible
@@ -264,7 +267,7 @@ rel_read (rel_t *s)
 
         struct timespec *timespec = (struct timespec*) malloc(sizeof(struct timespec));
         clock_gettime (CLOCK_MONOTONIC, timespec);
-        add_to_out_list(s, to_send, to_send->seqno, HEADER_SIZE + conn_input_return, timespec);
+        add_to_out_list(s, to_send, s->next_out_seq, HEADER_SIZE + conn_input_return, timespec);
     }
     //No data currently available
     else if (conn_input_return == 0) { 
@@ -273,7 +276,7 @@ rel_read (rel_t *s)
     //Send EOF
     else if (conn_input_return == -1) {
         //Calculate fields
-        to_send->len = HEADER_SIZE;
+        to_send->len = htons(HEADER_SIZE);
         to_send->cksum = cksum ((void*) to_send, HEADER_SIZE);
 
         //Record
@@ -283,7 +286,7 @@ rel_read (rel_t *s)
         conn_sendpkt (s->c, to_send, HEADER_SIZE);
         struct timespec *timespec = (struct timespec*) malloc(sizeof(struct timespec));
         clock_gettime (CLOCK_MONOTONIC, timespec);
-        add_to_out_list(s, to_send, to_send->seqno, HEADER_SIZE, timespec);
+        add_to_out_list(s, to_send, s->next_out_seq, HEADER_SIZE, timespec);
     }
 
     //Increment sequence number
