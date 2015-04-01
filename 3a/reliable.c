@@ -231,18 +231,10 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
         }
 
         //Print packet data
-        int conn_output_return;
-        int curr_bufspace = conn_bufspace(r->c);
-
-        if (curr_bufspace >= n - HEADER_SIZE) {
-            conn_output_return = conn_output(r->c, (void*) pkt->data, n - HEADER_SIZE);
-            send_ack(r);
-        }
-        else {
-            conn_output_return = conn_output(r->c, (void*) pkt->data, n - HEADER_SIZE);
-        }
-        if (conn_output_return == 0) {}
-        if (conn_output_return == -1) {}
+        in_pkt_buff.len = n - HEADER_SIZE;
+        in_pkt_buff.progress = 0;
+        in_pkt_buff.data = (void*) pkt->data;
+        rel_output(r);
     }
 }
 
@@ -301,7 +293,15 @@ rel_read (rel_t *s)
 void
 rel_output (rel_t *r)
 {
-
+    int conn_output_return = conn_output(r->c, in_pkt_buff.data, in_pkt_buff.len - in_pkt_buff.progress);
+    if (conn_output_return == in_pkt_buff.len - in_pkt_buff.progress) {
+        send_ack(r);
+    }
+    if (conn_output_return > 0 && conn_output_return < in_pkt_buff.len - in_pkt_buff.progress) {
+        in_pkt_buff.progress += conn_output_return;
+    }
+    if (conn_output_return == 0) {}
+    if (conn_output_return == -1) {}
 }
 
 // Retransmit any packets that need to be retransmitted
