@@ -222,14 +222,16 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
         return;
     }
 
-    //Received ack
-    if (ntohs(pkt->len) == ACK_SIZE) {
-        struct ack_packet* recvd_ack = (struct ack_packet*) pkt;
-        r->last_ack = ntohl(recvd_ack->ackno);
-    }
+    //Update last_ack state
+    if (ntohl(pkt->ackno) > r->last_ack && ntohl(pkt->ackno) <= r->next_out_seq)
+        r->last_ack = ntohl(pkt->ackno);
 
     //Received data packet
     if (ntohs(pkt->len) >= HEADER_SIZE && ntohl(pkt->seqno) == r->next_in_seq) {
+        //Discard impossible length
+        /*if (ntohs(pkt->len) > PACKET_SIZE)
+            return;*/ 
+
         //Received EOF
         if (ntohs(pkt->len) == HEADER_SIZE) {
             r->recv_eof = 1;
