@@ -200,14 +200,11 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
         r->last_ack = recvd_ack->ackno;
     }
 
-
-
     //Received data packet
     if (pkt->len >= HEADER_SIZE && pkt->seqno == r->next_in_seq) {
         //Received EOF
-        if (pkt->len == HEADER_SIZE) {
+        if (pkt->len == HEADER_SIZE)
             r->recv_eof = 1;
-        }
 
         //Print packet data
         int conn_output_return;
@@ -316,8 +313,9 @@ rel_timer () {
 
     rel_t *temp_rel = rel_list;
     while (temp_rel) {
-        if ((temp_rel->send_eof > 0) && (temp_rel->recv_eof > 0))
+        if (temp_rel -> send_eof > 0 && temp_rel -> recv_eof > 0) {
             //rel_destroy(temp_rel);
+        }
         temp_rel = temp_rel->next;
     }
 }
