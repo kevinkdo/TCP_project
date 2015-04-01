@@ -32,6 +32,8 @@ struct reliable_state {
     int next_in_seq;        // seqno of next expected packet
     int next_out_seq;       // seqno of next packet to send
     int last_ack;           // seqno of last packet acked
+    int send_eof;           // 1 if we have sent eof
+    int recv_eof;           // 0 if we have received eof
 
     // Copied from config_common
     int window;             // # of unacknowledged packets in flight
@@ -126,6 +128,9 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
     r->window = cc->window;
     r->timeout = cc->timeout;
 
+    r->send_eof = 0;
+    r->recv_eof = 0;
+
     return r;
 }
 
@@ -139,6 +144,7 @@ rel_destroy (rel_t *r)
     conn_destroy (r->c);
 
     /* Free any other allocated memory here */
+    // TODO
 }
 
 
@@ -175,50 +181,28 @@ rel_demux (const struct config_common *cc,
 //      rel_t * r = rel_create(NULL, ss, cc);
 //      rel_recvpkt(r, pkt, len);
 //  }
-
 }
 
 // Process a received packet
-// TODO When n = HEADER_SIZE, consider that an EOF condition.
 void
 rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 {
+    // Verify checksum; abort if necessary
+    uint16_t cksum_recv = pkt->cksum;
+    pkt->cksum = 0x0000;
+    uint16_t cksum_calc = cksum ((void*) pkt, pkt->len);
+    if (cksum_recv != cksum_calc)
+        return;
+
+    //Received ack
     if (pkt->len == ACK_SIZE) {
         struct ack_packet* recvd_ack = (struct ack_packet*) pkt;
-
-        // Verify checksum; abort if necessary
-        uint16_t cksum_recv = recvd_ack->cksum;
-        recvd_ack->cksum = 0;
-        uint16_t cksum_calc = cksum ((void*) recvd_ack, n);
-        if (cksum_recv != cksum_calc)
-            return;
-
-        // Update last_ack
         r->last_ack = recvd_ack->ackno;
     }
-    if (pkt->len >= HEADER_SIZE && pkt->seqno == r->next_in_seq) {
-        // Verify checksum; abort if necessary
-        uint16_t cksum_recv = pkt->cksum;
-        pkt->cksum = 0;
-        uint16_t cksum_calc = cksum ((void*) pkt, n);
-        if (cksum_recv != cksum_calc)
-            return;
 
-        //Print packet data
-        int conn_output_return;
-        conn_output_return = conn_output(r->c, (void*) pkt->data, n - HEADER_SIZE);
-
-        if (conn_output_return > 0 && conn_output_return < n-HEADER_SIZE){
-            // TODO: call conn_output again, passing in portion of the message did not write the first time
-
-        }
-        else if (conn_output_return == 0 ){
-            //EOF sent
-        }
-        else if (conn_output_return == -1 ){
-            //error
-        }
-
+    //Common code for EOF and data packet
+    if (pkt->len >= HEADER_SIZE) {
+        //Update ackno
         r->next_in_seq++;
 
         //Construct ack
@@ -230,6 +214,29 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 
         //Send ack
         conn_sendpkt (r->c, (packet_t*) &sent_ack, ACK_SIZE);
+    }
+
+    //Received EOF
+    if (pkt->len == HEADER_SIZE) {
+        r->recv_eof = 1;
+    }
+
+    //Received data packet
+    if (pkt->len > HEADER_SIZE && pkt->seqno == r->next_in_seq) {
+        //Print packet data
+        int conn_output_return;
+        conn_output_return = conn_output(r->c, (void*) pkt->data, n - HEADER_SIZE);
+
+        if (conn_output_return > 0 && conn_output_return < n-HEADER_SIZE){
+            // TODO: call conn_output again, passing in portion of the message did not write the first time
+
+        }
+        else if (conn_output_return == 0 ) {
+            
+        }
+        else if (conn_output_return == -1 ) {
+            //error
+        }
     }
 }
 
@@ -260,12 +267,25 @@ rel_read (rel_t *s)
             clock_gettime (CLOCK_MONOTONIC, timespec);
             add_to_out_list(s, to_send, to_send->seqno, HEADER_SIZE + conn_input_return, timespec);
     }
-    else if (conn_input_return == 0) {
-        //TODO no data currently available
+    //No data currently available
+    else if (conn_input_return == 0) { 
         return;
     }
+    //Send EOF
     else if (conn_input_return == -1) {
-        //TODO EOF or error
+        //Recalculate fields
+        to_send->cksum = 0x0000;
+        to_send->len = HEADER_SIZE;
+        to_send->cksum = cksum ((void*) to_send, HEADER_SIZE);
+
+        //Record
+        s->send_eof = 1;
+
+        //Send and add to list
+        conn_sendpkt (s->c, to_send, HEADER_SIZE);
+        struct timespec *timespec = (struct timespec*) malloc(sizeof(struct timespec));
+        clock_gettime (CLOCK_MONOTONIC, timespec);
+        add_to_out_list(s, to_send, to_send->seqno, HEADER_SIZE, timespec);
         return;
     }
 
@@ -283,7 +303,7 @@ rel_output (rel_t *r)
 void
 rel_timer () {
     out_pkt_t *temp = out_list_head;
-    while (temp != NULL) {
+    while (temp) {
         //If unacked + window is satisfied + timeout, resend
         if (temp->seqno >= temp->r->last_ack &&
             temp->seqno - temp->r->last_ack < temp->r->window && 
@@ -293,5 +313,12 @@ rel_timer () {
             clock_gettime(CLOCK_MONOTONIC, temp->last_try);
         }
         temp = temp->next;
+    }
+
+    rel_t *temp_rel = rel_list;
+    while (temp_rel) {
+        if (temp_rel -> send_eof > 0 && temp_rel -> recv_eof > 0)
+            rel_destroy(temp_rel);
+        temp_rel = temp_rel->next;
     }
 }
