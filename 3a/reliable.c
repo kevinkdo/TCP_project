@@ -22,6 +22,7 @@
 #define HEADER_SIZE 12
 
 /* ===== Structs ===== */
+// Typedef rel_t
 struct reliable_state {
     rel_t *next;            // linked list node
     rel_t **prev;
@@ -40,7 +41,7 @@ struct reliable_state {
     int timeout;            // Retransmission timeout in milliseconds
 };
 
-//Keeps track of packets sent out and waiting for acks
+// Struct for packets sent out and waiting for acks
 typedef struct out_pkt {
     rel_t *r;                   // rel_t associated with this packet
     packet_t *pkt;              // packet that was sent
@@ -78,7 +79,7 @@ void send_ack(rel_t* r) {
     conn_sendpkt (r->c, (packet_t*) &sent_ack, ACK_SIZE);
 }
 
-// Returns how much time left (in seconds) until timeout
+// Returns how much time left (in seconds) until timeout; copied from rlib.c, need_timer_in()
 long time_until_timeout (const struct timespec *last, long timeout) {
     long to;
     struct timespec ts;
@@ -96,6 +97,7 @@ long time_until_timeout (const struct timespec *last, long timeout) {
 
 //Adds a packet to the list of out packets waiting for acks
 void add_to_out_list(rel_t* r, packet_t *pkt, int seqno, size_t size, struct timespec* timespec) {
+    //Construct out_pkt_t
     out_pkt_t *to_add = (out_pkt_t*) malloc(sizeof(out_pkt_t));
     to_add->r = r;
     to_add->pkt = pkt;
@@ -104,6 +106,7 @@ void add_to_out_list(rel_t* r, packet_t *pkt, int seqno, size_t size, struct tim
     to_add->next = NULL;
     to_add->last_try = timespec;
 
+    //Add to list
     if (out_list_head == NULL) {
         out_list_head = to_add;
     }
@@ -123,6 +126,7 @@ rel_t *
 rel_create (conn_t *c, const struct sockaddr_storage *ss,
             const struct config_common *cc)
 {
+    //Given code
     rel_t *r;
 
     r = xmalloc (sizeof (*r));
@@ -143,7 +147,7 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
         rel_list->prev = &r->next;
     rel_list = r;
 
-    // Our initialization
+    //Our initialization
     r->next_out_seq = 1;
     r->next_in_seq = 1;
     r->last_ack = 1;
@@ -215,8 +219,6 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
     pkt->cksum = 0x0000;
     uint16_t cksum_calc = cksum ((void*) pkt, ntohs(pkt->len));
     if (cksum_recv != cksum_calc) {
-        printf("failed chksum");
-        fflush(stdout);
         return;
     }
 
@@ -293,18 +295,24 @@ rel_read (rel_t *s)
     s->next_out_seq++;
 }
 
+//Output received data
 void
 rel_output (rel_t *r)
 {
+    //Output
     int conn_output_return = conn_output(r->c, in_pkt_buff.data, in_pkt_buff.len - in_pkt_buff.progress);
-    if (conn_output_return == in_pkt_buff.len - in_pkt_buff.progress) {
-        send_ack(r);
-    }
-    if (conn_output_return > 0 && conn_output_return < in_pkt_buff.len - in_pkt_buff.progress) {
+
+    //Record progress
+    if (conn_output_return > 0) {
         in_pkt_buff.progress += conn_output_return;
     }
     if (conn_output_return == 0) {}
     if (conn_output_return == -1) {}
+
+    //If done, send ack
+    if (in_pkt_buff.progress == in_pkt_buff.len ) {
+        send_ack(r);
+    }
 }
 
 // Retransmit any packets that need to be retransmitted
@@ -323,6 +331,7 @@ rel_timer () {
         temp = temp->next;
     }
 
+    //If necessary, close connection
     rel_t *temp_rel = rel_list;
     while (temp_rel) {
         if (temp_rel -> send_eof > 0 && temp_rel -> recv_eof > 0 && temp_rel->last_ack == temp_rel->next_out_seq) {
