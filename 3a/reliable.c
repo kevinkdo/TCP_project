@@ -23,10 +23,10 @@
 
 /* ===== Structs ===== */
 struct reliable_state {
-    rel_t *next; //linked list node
+    rel_t *next;            // linked list node
     rel_t **prev;
 
-    conn_t *c;
+    conn_t *c;              // connection object
 
     // Our data
     int next_in_seq;        // seqno of next expected packet
@@ -53,7 +53,7 @@ rel_t *rel_list;
 out_pkt_t *out_list_head = NULL;
 
 /* ===== Functions ===== */
-// Returns how much time left until timeout
+// Returns how much time left (in seconds) until timeout
 long time_until_timeout (const struct timespec *last, long timeout) {
     long to;
     struct timespec ts;
@@ -121,7 +121,7 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
     // Our initialization
     r->next_out_seq = 1;
     r->next_in_seq = 1;
-    r->last_ack = -1;
+    r->last_ack = 1;
 
     r->window = cc->window;
     r->timeout = cc->timeout;
@@ -180,6 +180,7 @@ rel_demux (const struct config_common *cc,
 
 // Process a received packet
 // TODO You must examine the length field, and should not assume that the UDP packet you receive is the correct length
+// TODO When n = HEADER_SIZE, consider that an EOF condition.
 void
 rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 {
@@ -233,7 +234,6 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
     }
 }
 
-//TODO account for window size
 //TODO To conserve packets, a sender should not send more than one unacknowledged Data frame with less than the maximum number of packets (500), somewhat like TCP's Nagle algorithm.
 // Read user input and send a packet
 void
@@ -252,9 +252,11 @@ rel_read (rel_t *s)
     //Calculate checksum
     to_send->cksum = cksum ((void*) to_send, HEADER_SIZE + conn_input_return);
 
-    //Send packet
+    //Send if possible; add to list
     if (conn_input_return > -1) {
-            conn_sendpkt (s->c, to_send, HEADER_SIZE + conn_input_return);
+            if (s->next_out_seq - s->last_ack < s->window)
+                conn_sendpkt (s->c, to_send, HEADER_SIZE + conn_input_return);
+
             struct timespec *timespec = (struct timespec*) malloc(sizeof(struct timespec));
             clock_gettime (CLOCK_MONOTONIC, timespec);
             add_to_out_list(s, to_send, to_send->seqno, HEADER_SIZE + conn_input_return, timespec);
@@ -283,8 +285,9 @@ void
 rel_timer () {
     out_pkt_t *temp = out_list_head;
     while (temp != NULL) {
-        //If unacked + timeout, resend
+        //If unacked + window is satisfied + timeout, resend
         if (temp->seqno >= temp->r->last_ack &&
+            temp->seqno - temp->r->last_ack < temp->r->window && 
             time_until_timeout(temp->last_try, (long) temp->r->timeout) == 0)
         {
             conn_sendpkt (temp->r->c, temp->pkt, temp->size);
