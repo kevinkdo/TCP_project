@@ -29,18 +29,23 @@ struct reliable_state {
     conn_t *c;
 
     // Our data
-    int next_in_seq;
-    int next_out_seq;
-    int last_ack;
+    int next_in_seq;        // seqno of next expected packet
+    int next_out_seq;       // seqno of next packet to send
+    int last_ack;           // seqno of last packet acked
+
+    // Copied from config_common
+    int window;             // # of unacknowledged packets in flight
+    int timeout;            // Retransmission timeout in milliseconds
 };
 
 //Keeps track of packets sent out and waiting for acks
 typedef struct out_pkt {
-    rel_t *r;
-    packet_t *pkt;
-    int seqno;
-    size_t size;
-    struct out_pkt *next;//linked list node
+    rel_t *r;                   // rel_t associated with this packet
+    packet_t *pkt;              // packet that was sent
+    int seqno;                  // pkt->seqno
+    size_t size;                // length of pkt
+    struct timespec *last_try;  // timespec of last send attempt
+    struct out_pkt *next;       // linked list node
 } out_pkt_t;
 
 /* ===== Global variables ===== */
@@ -48,14 +53,31 @@ rel_t *rel_list;
 out_pkt_t *out_list_head = NULL;
 
 /* ===== Functions ===== */
+// Returns how much time left until timeout
+long time_until_timeout (const struct timespec *last, long timeout) {
+    long to;
+    struct timespec ts;
+
+    clock_gettime (CLOCK_MONOTONIC, &ts);
+    to = ts.tv_sec - last->tv_sec;
+    if (to > timeout / 1000)
+        return 0;
+    to = to * 1000 + (ts.tv_nsec - last->tv_nsec) / 1000000;
+    if (to >= timeout)
+        return 0;
+    return
+        timeout - to;
+}
+
 //Adds a packet to the list of out packets waiting for acks
-void add_to_out_list(rel_t* r, packet_t *pkt, int seqno, size_t size) {
+void add_to_out_list(rel_t* r, packet_t *pkt, int seqno, size_t size, struct timespec* timespec) {
     out_pkt_t *to_add = (out_pkt_t*) malloc(sizeof(out_pkt_t));
     to_add->r = r;
     to_add->pkt = pkt;
     to_add->seqno = seqno;
     to_add->size = size;
     to_add->next = NULL;
+    to_add->last_try = timespec;
 
     if (out_list_head == NULL) {
         out_list_head = to_add;
@@ -100,6 +122,9 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
     r->next_out_seq = 1;
     r->next_in_seq = 1;
     r->last_ack = -1;
+
+    r->window = cc->window;
+    r->timeout = cc->timeout;
 
     return r;
 }
@@ -154,6 +179,7 @@ rel_demux (const struct config_common *cc,
 }
 
 // Process a received packet
+// TODO You must examine the length field, and should not assume that the UDP packet you receive is the correct length
 void
 rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 {
@@ -208,6 +234,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 }
 
 //TODO account for window size
+//TODO To conserve packets, a sender should not send more than one unacknowledged Data frame with less than the maximum number of packets (500), somewhat like TCP's Nagle algorithm.
 // Read user input and send a packet
 void
 rel_read (rel_t *s)
@@ -228,7 +255,9 @@ rel_read (rel_t *s)
     //Send packet
     if (conn_input_return > -1) {
             conn_sendpkt (s->c, to_send, HEADER_SIZE + conn_input_return);
-            add_to_out_list(s, to_send, to_send->seqno, HEADER_SIZE + conn_input_return);
+            struct timespec *timespec = (struct timespec*) malloc(sizeof(struct timespec));
+            clock_gettime (CLOCK_MONOTONIC, timespec);
+            add_to_out_list(s, to_send, to_send->seqno, HEADER_SIZE + conn_input_return, timespec);
     }
     else if (conn_input_return == 0) {
         //TODO no data currently available
@@ -251,12 +280,13 @@ rel_output (rel_t *r)
 
 // Retransmit any packets that need to be retransmitted
 void
-rel_timer ()
-{
-    //TODO keep track of time elapsed since last try, and only retransmit once timer > timeout
+rel_timer () {
     out_pkt_t *temp = out_list_head;
     while (temp != NULL) {
-        if (temp->seqno >= temp->r->last_ack) {
+        //If unacked + timeout, resend
+        if (temp->seqno >= temp->r->last_ack &&
+            time_until_timeout(temp->last_try, (long) temp->r->timeout) == 0)
+        {
             conn_sendpkt (temp->r->c, temp->pkt, temp->size);
         }
         temp = temp->next;
