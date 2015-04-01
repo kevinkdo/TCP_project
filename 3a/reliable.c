@@ -200,26 +200,15 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
         r->last_ack = recvd_ack->ackno;
     }
 
-    //Received EOF
-    if (pkt->len == HEADER_SIZE) {
-        r->recv_eof = 1;
 
-        //Update ackno
-        r->next_in_seq++;
-
-        //Construct ack
-        struct ack_packet sent_ack;
-        sent_ack.cksum = 0x0000;
-        sent_ack.len = ACK_SIZE;
-        sent_ack.ackno = r->next_in_seq;
-        sent_ack.cksum = cksum ((void*) &sent_ack, ACK_SIZE);
-
-        //Send ack
-        conn_sendpkt (r->c, (packet_t*) &sent_ack, ACK_SIZE);
-    }
 
     //Received data packet
-    if (pkt->len > HEADER_SIZE && pkt->seqno == r->next_in_seq) {
+    if (pkt->len >= HEADER_SIZE && pkt->seqno == r->next_in_seq) {
+        //Received EOF
+        if (pkt->len == HEADER_SIZE) {
+            r->recv_eof = 1;
+        }
+
         //Print packet data
         int conn_output_return;
         conn_output_return = conn_output(r->c, (void*) pkt->data, n - HEADER_SIZE);
@@ -327,8 +316,8 @@ rel_timer () {
 
     rel_t *temp_rel = rel_list;
     while (temp_rel) {
-        if (temp_rel -> send_eof > 0 && temp_rel -> recv_eof > 0)
-            rel_destroy(temp_rel);
+        if ((temp_rel->send_eof > 0) && (temp_rel->recv_eof > 0))
+            //rel_destroy(temp_rel);
         temp_rel = temp_rel->next;
     }
 }
