@@ -248,7 +248,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
         }
 
         //check whether should be printed
-        if (ntohl(pkt->seqno) == r->next_in_seq){ 
+        if (ntohl(pkt->seqno) == r->next_in_seq) { 
             //is expected pkt, print data
             in_pkt_buff.len = n - HEADER_SIZE;
             in_pkt_buff.progress = 0;
@@ -256,8 +256,8 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
             rel_output(r);
 
             //check in_list and if gap is filled output data till 
-            if(in_list_head){
-              if(in_list_head->seqno == ntohl(pkt->seqno) + 1){
+            if (in_list_head) {
+              if (in_list_head->seqno == ntohl(pkt->seqno) + 1) {
                 // TODO: print packet in in_list till another gap is detected
 
               } 
@@ -277,13 +277,33 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
             }
             else {
               in_pkt_t* temp = in_list_head;
-            while (temp->next != NULL)
-              temp = temp->next;
+              while (temp->next != NULL) {
+                 temp = temp->next;
+              }
               temp->next = to_add;
-            }
         }
     }
 }
+
+/*
+void
+insert_into_sorted_in_list(in_pkt_t *to_add) //LOOK HERE FIRST FOR BUGS
+{
+    if (!in_list_head) {
+        in_list_head = to_add;
+    } else {
+        in_pkt_t* curr = in_list_head;
+        in_pkt_t* next; 
+        while (curr->next != NULL && to_add->seqno >= curr->seqno) {
+            curr = curr->next;
+        }
+        next = curr->next;
+        curr->next = to_add;
+        to_add->next = next; 
+    }
+    return;
+}*/
+
 
 //TODO To conserve packets, a sender should not send more than one unacknowledged Data frame with less than the maximum number of packets (500), somewhat like TCP's Nagle algorithm.
 // Read user input and send a packet
