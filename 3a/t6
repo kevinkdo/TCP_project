@@ -1,3 +1,0 @@
-./tester -T 6 -w 10 ./reliable -w 10 -t 300
-
-
