@@ -51,17 +51,27 @@ typedef struct out_pkt {
     struct out_pkt *next;       // linked list node
 } out_pkt_t;
 
-// Struct for received packets
+// struct for packets that recieved but should not be printed due to previous missing packets
 typedef struct in_pkt {
+    rel_t *r;                   // rel_t associated with this packet
+    packet_t *pkt;              // packet that was received
+    int seqno;                  // pkt->seqno
+    size_t size;                // length of pkt
+    struct in_pkt *next;        // linked list node
+} in_pkt_t;
+
+// Struct for received packets (when conn_output cannot output data all in once)
+typedef struct in_pkt_buff {
     int len;
     int progress;
     void *data;
-} in_pkt_t;
+} in_pkt_buff_t;
 
 /* ===== Global variables ===== */
 rel_t *rel_list;
 out_pkt_t *out_list_head = NULL;
-in_pkt_t in_pkt_buff;
+in_pkt_t *in_list_head = NULL;
+in_pkt_buff_t in_pkt_buff;
 
 /* ===== Functions ===== */
 void send_ack(rel_t* r) {
@@ -232,16 +242,46 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
         /*if (ntohs(pkt->len) > PACKET_SIZE)
             return;*/ 
 
-        //Received EOF
+        //Received EOF (TODO: move to after SACK?)
         if (ntohs(pkt->len) == HEADER_SIZE) {
             r->recv_eof = 1;
         }
 
-        //Print packet data
-        in_pkt_buff.len = n - HEADER_SIZE;
-        in_pkt_buff.progress = 0;
-        in_pkt_buff.data = (void*) pkt->data;
-        rel_output(r);
+        //check whether should be printed
+        if (ntohl(pkt->seqno) == r->next_in_seq){ 
+            //is expected pkt, print data
+            in_pkt_buff.len = n - HEADER_SIZE;
+            in_pkt_buff.progress = 0;
+            in_pkt_buff.data = (void*) pkt->data;
+            rel_output(r);
+
+            //check in_list and if gap is filled output data till 
+            if(in_list_head){
+              if(in_list_head->seqno == ntohl(pkt->seqno) + 1){
+                // TODO: print packet in in_list till another gap is detected
+
+              } 
+            }
+
+        } else {
+            //add to in_list, borrowed from add_to_out_list
+            in_pkt_t *to_add = (in_pkt_t*) malloc(sizeof(in_pkt_t));
+            to_add->r = r;
+            to_add->pkt = pkt;
+            to_add->seqno = ntohl(pkt->seqno);
+            to_add->size = n;
+            to_add->next = NULL;
+
+            if (in_list_head == NULL) {
+              in_list_head = to_add;
+            }
+            else {
+              in_pkt_t* temp = in_list_head;
+            while (temp->next != NULL)
+              temp = temp->next;
+              temp->next = to_add;
+            }
+        }
     }
 }
 
