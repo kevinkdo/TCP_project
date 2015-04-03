@@ -172,6 +172,7 @@ void add_to_out_list(rel_t* r, packet_t *pkt, int seqno, size_t size, struct tim
     r->timeout = cc->timeout;
     r->r_largest_acceptable_seq = 1 + r->window;
     r->r_progress = 0;
+    r->r_to_print_pkt_seq = 1;
 
     r->send_eof = 0;
     r->recv_eof = 0;
@@ -435,11 +436,14 @@ insert_into_sorted_in_list(in_pkt_t *to_add) //LOOK HERE FIRST FOR BUGS
     {
     //Output
         in_pkt_t* temp = in_list_head;
-        while(temp->next != NULL) {
+        while(temp != NULL) {
             if (r->r_to_print_pkt_seq == temp->seqno) {
                 break;
             }
             temp = temp->next;
+        }
+        if (temp == NULL) {
+            return;
         }
 
         int conn_output_return = conn_output(r->c, temp->pkt->data, temp->size - r->r_progress);
