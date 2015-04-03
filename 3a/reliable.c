@@ -1,4 +1,4 @@
-
+    
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -53,7 +53,7 @@ struct reliable_state {
 typedef struct out_pkt {
     rel_t *r;                   // rel_t associated with this packet
     packet_t *pkt;              // packet that was sent
-    int seqno;                  // pkt->seqno
+     int seqno;                  // pkt->seqno
     size_t size;                // length of pkt
     struct timespec *last_try;  // timespec of last send attempt
     struct out_pkt *next;       // linked list node
@@ -108,7 +108,7 @@ long time_until_timeout (const struct timespec *last, long timeout) {
     if (to >= timeout)
         return 0;
     return
-        timeout - to;
+    timeout - to;
 }
 
 //Adds a packet to the list of out packets waiting for acks
@@ -138,10 +138,10 @@ void add_to_out_list(rel_t* r, packet_t *pkt, int seqno, size_t size, struct tim
  * Exactly one of c and ss should be NULL.  (ss is NULL when called
  * from rlib.c, while c is NULL when this function is called from
  * rel_demux.) */
-rel_t *
-rel_create (conn_t *c, const struct sockaddr_storage *ss,
-            const struct config_common *cc)
-{
+ rel_t *
+ rel_create (conn_t *c, const struct sockaddr_storage *ss,
+    const struct config_common *cc)
+ {
     //Given code
     rel_t *r;
 
@@ -170,6 +170,8 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
 
     r->window = cc->window;
     r->timeout = cc->timeout;
+    r->r_largest_acceptable_seq = 1 + r->window;
+    r->r_progress = 0;
 
     r->send_eof = 0;
     r->recv_eof = 0;
@@ -199,11 +201,11 @@ rel_destroy (rel_t *r)
  * ().  (Pass rel_create NULL for the conn_t, so it will know to
  * allocate a new connection.)
  */
-void
-rel_demux (const struct config_common *cc,
-         const struct sockaddr_storage *ss,
-         packet_t *pkt, size_t len)
-{
+    void
+    rel_demux (const struct config_common *cc,
+       const struct sockaddr_storage *ss,
+       packet_t *pkt, size_t len)
+    {
 //  /* demultiplex called when in server mode,
 //   * if seq == 1 from a new sockaddr_storage, invoke rel_create else receive
 //   */
@@ -224,77 +226,80 @@ rel_demux (const struct config_common *cc,
 //      rel_t * r = rel_create(NULL, ss, cc);
 //      rel_recvpkt(r, pkt, len);
 //  }
-}
+    }
 
 // Process a received packet
-void
-rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
-{
+    void
+    rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
+    {
     // Verify checksum; abort if necessary
-    uint16_t cksum_recv = pkt->cksum;
-    pkt->cksum = 0x0000;
-    uint16_t cksum_calc = cksum ((void*) pkt, ntohs(pkt->len));
-    if (cksum_recv != cksum_calc) {
-        return;
-    }
+        uint16_t cksum_recv = pkt->cksum;
+        pkt->cksum = 0x0000;
+        uint16_t cksum_calc = cksum ((void*) pkt, ntohs(pkt->len));
+        if (cksum_recv != cksum_calc) {
+            return;
+        }
 
     // Received ACK
-    if (n == ACK_SIZE){
-      if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
-          r->s_last_ack_recvd = ntohl(pkt->ackno);
+        if (n == ACK_SIZE){
+          if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
+              r->s_last_ack_recvd = ntohl(pkt->ackno);
+          }
       }
-    }
 
     // Received data pkt
     // detect garbage
-  if (ntohl(pkt->seqno) <= (r->r_next_exp_seq -1) ||
-      ntohl(pkt->seqno) > r->r_largest_acceptable_seq){
+      if (ntohl(pkt->seqno) <= (r->r_next_exp_seq -1) ||
+          ntohl(pkt->seqno) > r->r_largest_acceptable_seq){
     //outside of receiving window, drop pkt
-    return;
-  }
+        return;
+}
 
 
     // add to in_pkt_list
-  in_pkt_t *to_add = (in_pkt_t*) malloc(sizeof(in_pkt_t));
-  to_add->r = r;
-  to_add->pkt = pkt;
-  to_add->seqno = ntohl(pkt->seqno);
-  to_add->size = n;
-  to_add->next = NULL;
+in_pkt_t *to_add = (in_pkt_t*) malloc(sizeof(in_pkt_t));
+to_add->r = r;
+to_add->pkt = pkt;
+to_add->seqno = ntohl(pkt->seqno);
+to_add->size = n;
+to_add->next = NULL;
 
-  if (in_list_head == NULL) {
+if (in_list_head == NULL) {
     in_list_head = to_add;
-  }
-  else {
+}
+else {
     in_pkt_t* temp = in_list_head;
     while (temp->next != NULL) {
       temp = temp->next;
-    }
-    temp->next = to_add;
   }
+  temp->next = to_add;
+}
 
   //check to find the right ack no to send
-  int prev_next_exp_seq = r->r_next_exp_seq;
-  in_pkt_t* temp = in_list_head;
-  while(temp->next != NULL){
+int prev_next_exp_seq = r->r_next_exp_seq;
+in_pkt_t* temp = in_list_head;
+while(temp->next != NULL){
     if (r->r_next_exp_seq == temp->seqno) {
       r->r_next_exp_seq++;
       temp = in_list_head;
-    }
-    temp = temp->next;
+      printf("%d", r->r_next_exp_seq);
   }
-
-  // r_next_exp_seq is the pkt that we are expecting, send ack
-  send_ack(r);
-
+  temp = temp->next;
+}
 
 
     // print
-  while (prev_next_exp_seq <= r->r_next_exp_seq) {
+while (prev_next_exp_seq <= r->r_next_exp_seq) {
     rel_output(r);
     prev_next_exp_seq++;
-  }
-  
+}
+
+  // r_next_exp_seq is the pkt that we are expecting, send ack
+send_ack(r);
+
+
+
+
 }
     /*** kevin's code *
     //Update last_ack state
@@ -374,108 +379,108 @@ insert_into_sorted_in_list(in_pkt_t *to_add) //LOOK HERE FIRST FOR BUGS
 
 //TODO To conserve packets, a sender should not send more than one unacknowledged Data frame with less than the maximum number of packets (500), somewhat like TCP's Nagle algorithm.
 // Read user input and send a packet
-void
-rel_read (rel_t *s)
-{
+    void
+    rel_read (rel_t *s)
+    {
     //Prepare packet
-    packet_t *to_send = (packet_t*) malloc(sizeof(packet_t));
-    to_send->cksum = 0x0000;
-    to_send->ackno = htonl(s->r_next_exp_seq);
-    to_send->seqno = htonl(s->s_next_out_pkt_seq);
-    
+        packet_t *to_send = (packet_t*) malloc(sizeof(packet_t));
+        to_send->cksum = 0x0000;
+        to_send->ackno = htonl(s->r_next_exp_seq);
+        to_send->seqno = htonl(s->s_next_out_pkt_seq);
+
     //Get user input
-    int conn_input_return = conn_input (s->c, (void*) to_send->data, PACKET_SIZE-HEADER_SIZE);
+        int conn_input_return = conn_input (s->c, (void*) to_send->data, PACKET_SIZE-HEADER_SIZE);
 
     //User entered data
-    if (conn_input_return > -1) {
+        if (conn_input_return > -1) {
         //Calculate fields
-        to_send->len = htons(conn_input_return + HEADER_SIZE);
-        to_send->cksum = cksum ((void*) to_send, HEADER_SIZE + conn_input_return);
+            to_send->len = htons(conn_input_return + HEADER_SIZE);
+            to_send->cksum = cksum ((void*) to_send, HEADER_SIZE + conn_input_return);
 
         //Send if possible
-        if (s->s_next_out_pkt_seq - s->s_last_ack_recvd < s->window)
-            conn_sendpkt (s->c, to_send, HEADER_SIZE + conn_input_return);
+            if (s->s_next_out_pkt_seq - s->s_last_ack_recvd < s->window)
+                conn_sendpkt (s->c, to_send, HEADER_SIZE + conn_input_return);
 
-        struct timespec *timespec = (struct timespec*) malloc(sizeof(struct timespec));
-        clock_gettime (CLOCK_MONOTONIC, timespec);
-        add_to_out_list(s, to_send, s->s_next_out_pkt_seq, HEADER_SIZE + conn_input_return, timespec);
-    }
+            struct timespec *timespec = (struct timespec*) malloc(sizeof(struct timespec));
+            clock_gettime (CLOCK_MONOTONIC, timespec);
+            add_to_out_list(s, to_send, s->s_next_out_pkt_seq, HEADER_SIZE + conn_input_return, timespec);
+        }
     //No data currently available
-    else if (conn_input_return == 0) { 
-        return;
-    }
+        else if (conn_input_return == 0) { 
+            return;
+        }
     //Send EOF
-    else if (conn_input_return == -1) {
+        else if (conn_input_return == -1) {
         //Calculate fields
-        to_send->len = htons(HEADER_SIZE);
-        to_send->cksum = cksum ((void*) to_send, HEADER_SIZE);
+            to_send->len = htons(HEADER_SIZE);
+            to_send->cksum = cksum ((void*) to_send, HEADER_SIZE);
 
         //Record
-        s->send_eof = 1;
+            s->send_eof = 1;
 
         //Send and add to list
-        conn_sendpkt (s->c, to_send, HEADER_SIZE);
-        struct timespec *timespec = (struct timespec*) malloc(sizeof(struct timespec));
-        clock_gettime (CLOCK_MONOTONIC, timespec);
-        add_to_out_list(s, to_send, s->s_next_out_pkt_seq, HEADER_SIZE, timespec);
-    }
+            conn_sendpkt (s->c, to_send, HEADER_SIZE);
+            struct timespec *timespec = (struct timespec*) malloc(sizeof(struct timespec));
+            clock_gettime (CLOCK_MONOTONIC, timespec);
+            add_to_out_list(s, to_send, s->s_next_out_pkt_seq, HEADER_SIZE, timespec);
+        }
 
     //Increment sequence number
-    s->s_next_out_pkt_seq++;
-}
+        s->s_next_out_pkt_seq++;
+    }
 
 //Output received data
-void
-rel_output (rel_t *r)
-{
+    void
+    rel_output (rel_t *r)
+    {
     //Output
-    in_pkt_t* temp = in_list_head;
-    while(temp->next != NULL) {
-        if (r->r_to_print_pkt_seq == temp->seqno) {
-            break;
+        in_pkt_t* temp = in_list_head;
+        while(temp->next != NULL) {
+            if (r->r_to_print_pkt_seq == temp->seqno) {
+                break;
+            }
+            temp = temp->next;
         }
-        temp = temp->next;
-    }
 
-    int conn_output_return = conn_output(r->c, temp->pkt->data, temp->size - r->r_progress);
+        int conn_output_return = conn_output(r->c, temp->pkt->data, temp->size - r->r_progress);
 
     //Record progress
-    if (conn_output_return > 0) {
-        r->r_progress += conn_output_return;
-    }
-    if (conn_output_return == 0) {}
-    if (conn_output_return == -1) {}
+        if (conn_output_return > 0) {
+            r->r_progress += conn_output_return;
+        }
+        if (conn_output_return == 0) {}
+            if (conn_output_return == -1) {}
 
     //If done, send ack
-    if (r->r_progress == temp->size) {
-        r->r_to_print_pkt_seq++;
-    }
-}
+                if (r->r_progress == temp->size) {
+                    r->r_to_print_pkt_seq++;
+                }
+            }
 
 // Retransmit any packets that need to be retransmitted
-void
-rel_timer () {
-    out_pkt_t *temp = out_list_head;
-    while (temp) {
+            void
+            rel_timer () {
+                out_pkt_t *temp = out_list_head;
+                while (temp) {
         //If unacked + window is satisfied + timeout, resend
-        if (temp->seqno >= temp->r->s_last_ack_recvd &&
-            temp->seqno - temp->r->s_last_ack_recvd < temp->r->window &&
-            time_until_timeout(temp->last_try, (long) temp->r->timeout) == 0)
-        {
-            conn_sendpkt (temp->r->c, temp->pkt, temp->size);
-            clock_gettime(CLOCK_MONOTONIC, temp->last_try);
-        }
-        temp = temp->next;
-    }
+                    if (temp->seqno >= temp->r->s_last_ack_recvd &&
+                        temp->seqno - temp->r->s_last_ack_recvd < temp->r->window &&
+                        time_until_timeout(temp->last_try, (long) temp->r->timeout) == 0)
+                    {
+                        conn_sendpkt (temp->r->c, temp->pkt, temp->size);
+                        clock_gettime(CLOCK_MONOTONIC, temp->last_try);
+                    }
+                    temp = temp->next;
+                }
 
     //If necessary, close connection
-    rel_t *temp_rel = rel_list;
-    while (temp_rel) {
-        if (temp_rel -> send_eof > 0 && temp_rel -> recv_eof > 0 && temp_rel->s_last_ack_recvd == temp_rel->s_next_out_pkt_seq) {
-            rel_destroy(temp_rel);
-        }
-        temp_rel = temp_rel->next;
-    }
-}
+                rel_t *temp_rel = rel_list;
+                while (temp_rel) {
+                    if (temp_rel -> send_eof > 0 && temp_rel -> recv_eof > 0 && temp_rel->s_last_ack_recvd == temp_rel->s_next_out_pkt_seq) {
+                        rel_destroy(temp_rel);
+                    }
+                    temp_rel = temp_rel->next;
+                }
+            }
 
 
