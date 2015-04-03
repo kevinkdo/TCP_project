@@ -172,6 +172,7 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
 	r->timeout = cc->timeout;
 	r->r_largest_acceptable_seq = 1 + r->window;
 	r->r_progress = 0;
+    r->r_to_print_pkt_seq = 1;
 
 	r->send_eof = 0;
 	r->recv_eof = 0;
@@ -244,6 +245,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 	if (n == ACK_SIZE){
 		if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
 			r->s_last_ack_recvd = ntohl(pkt->ackno);
+            return;
 		}
 	}
 
@@ -287,17 +289,19 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 		temp = temp->next;
 	}
 
+    printf("Identified ack no to send: %d\n", r->r_next_exp_seq);
+
+    // r_next_exp_seq is the pkt that we are expecting, send ack
+    send_ack(r);
+
 
 	// print
 	while (prev_next_exp_seq <= r->r_next_exp_seq) {
 		rel_output(r);
 		printf("called rel_output\n");
+        printf("prev_next_exp_seq: %d , r->r_next_exp_seq: %d\n", prev_next_exp_seq, r->r_next_exp_seq);
 		prev_next_exp_seq++;
 	}
-
-	// r_next_exp_seq is the pkt that we are expecting, send ack
-	send_ack(r);
-
 
 
 
@@ -434,15 +438,18 @@ rel_read (rel_t *s)
 void
 rel_output (rel_t *r)
 {
+    printf("to print packet seqno: %d\n", r->r_to_print_pkt_seq);
 	//Output
 	in_pkt_t* temp = in_list_head;
-	while(temp->next != NULL) {
+	while(temp != NULL) {
 		if (r->r_to_print_pkt_seq == temp->seqno) {
 			break;
 		}
 		temp = temp->next;
 	}
-
+    if (temp == NULL) {
+        return;
+    }
 	int conn_output_return = conn_output(r->c, temp->pkt->data, temp->size - r->r_progress);
 
 	//Record progress
