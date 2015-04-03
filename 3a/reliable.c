@@ -32,9 +32,9 @@ struct reliable_state {
     // Our data
 
     // sender's view
-    int s_next_out_pkt_seq; 	   // seqno of next packet to send
-    int s_last_ack_recvd;   	   // seqno of last packet acked
-    int send_eof;          		   // 1 if we have sent eof
+    int s_next_out_pkt_seq;      // seqno of next packet to send
+    int s_last_ack_recvd;        // seqno of last packet acked
+    int send_eof;                // 1 if we have sent eof
     int recv_eof;                  // 0 if we have received eof
 
     // receiver's view
@@ -240,61 +240,62 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 
     // Received ACK
     if (n == ACK_SIZE){
-    	if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
-	        r->s_last_ack_recvd = ntohl(pkt->ackno);
-    	}
+      if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
+          r->s_last_ack_recvd = ntohl(pkt->ackno);
+      }
     }
 
     // Received data pkt
     // detect garbage
-	if (ntohl(pkt->seqno) <= (r->r_next_exp_seq -1) ||
-			ntohl(pkt->seqno) > r->r_largest_acceptable_seq){
-		//outside of receiving window, drop pkt
-		return;
-	}
+  if (ntohl(pkt->seqno) <= (r->r_next_exp_seq -1) ||
+      ntohl(pkt->seqno) > r->r_largest_acceptable_seq){
+    //outside of receiving window, drop pkt
+    return;
+  }
 
 
     // add to in_pkt_list
-	in_pkt_t *to_add = (in_pkt_t*) malloc(sizeof(in_pkt_t));
-	to_add->r = r;
-	to_add->pkt = pkt;
-	to_add->seqno = ntohl(pkt->seqno);
-	to_add->size = n;
-	to_add->next = NULL;
+  in_pkt_t *to_add = (in_pkt_t*) malloc(sizeof(in_pkt_t));
+  to_add->r = r;
+  to_add->pkt = pkt;
+  to_add->seqno = ntohl(pkt->seqno);
+  to_add->size = n;
+  to_add->next = NULL;
 
-	if (in_list_head == NULL) {
-		in_list_head = to_add;
-	}
-	else {
-		in_pkt_t* temp = in_list_head;
-		while (temp->next != NULL) {
-			temp = temp->next;
-		}
-		temp->next = to_add;
-	}
+  if (in_list_head == NULL) {
+    in_list_head = to_add;
+  }
+  else {
+    in_pkt_t* temp = in_list_head;
+    while (temp->next != NULL) {
+      temp = temp->next;
+    }
+    temp->next = to_add;
+  }
 
-	//check to find the right ack no to send
-	int prev_next_exp_seq = r->r_next_exp_seq;
-	in_pkt_t* temp = in_list_head;
-	while(temp->next != NULL){
-		if (r->r_next_exp_seq == temp->seqno) {
-			r->r_next_exp_seq++;
-			temp = in_list_head;
-		}
-		temp = temp->next;
-	}
+  //check to find the right ack no to send
+  int prev_next_exp_seq = r->r_next_exp_seq;
+  in_pkt_t* temp = in_list_head;
+  while(temp->next != NULL){
+    if (r->r_next_exp_seq == temp->seqno) {
+      r->r_next_exp_seq++;
+      temp = in_list_head;
+    }
+    temp = temp->next;
+  }
 
-	// r_next_exp_seq is the pkt that we are expecting, send ack
-	send_ack(r);
+  // r_next_exp_seq is the pkt that we are expecting, send ack
+  send_ack(r);
 
 
 
     // print
-	for (int i = prev_next_exp_seq; i <= r_next_exp_seq; i++) {
-		rel_output(r);
-		//r->
-	}
-
+  while (prev_next_exp_seq <= r->r_next_exp_seq) {
+    rel_output(r);
+    prev_next_exp_seq++;
+  }
+  
+}
     /*** kevin's code *
     //Update last_ack state
     if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq)
@@ -428,18 +429,26 @@ void
 rel_output (rel_t *r)
 {
     //Output
-    int conn_output_return = conn_output(r->c, in_pkt_buff.data, in_pkt_buff.len - in_pkt_buff.progress);
+    in_pkt_t* temp = in_list_head;
+    while(temp->next != NULL) {
+        if (r->r_to_print_pkt_seq == temp->seqno) {
+            break;
+        }
+        temp = temp->next;
+    }
+
+    int conn_output_return = conn_output(r->c, temp->pkt->data, temp->size - r->r_progress);
 
     //Record progress
     if (conn_output_return > 0) {
-        in_pkt_buff.progress += conn_output_return;
+        r->r_progress += conn_output_return;
     }
     if (conn_output_return == 0) {}
     if (conn_output_return == -1) {}
 
     //If done, send ack
-    if (in_pkt_buff.progress == in_pkt_buff.len ) {
-        send_ack(r);
+    if (r->r_progress == temp->size) {
+        r->r_to_print_pkt_seq++;
     }
 }
 
