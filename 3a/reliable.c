@@ -32,15 +32,16 @@ struct reliable_state {
     // Our data
 
     // sender's view
-    int s_next_out_pkt_seq;   // seqno of next packet to send
-    int s_last_ack_recvd;     // seqno of last packet acked
-    int send_eof;             // 1 if we have sent eof
-    int recv_eof;             // 0 if we have received eof
+    int s_next_out_pkt_seq; 	   // seqno of next packet to send
+    int s_last_ack_recvd;   	   // seqno of last packet acked
+    int send_eof;          		   // 1 if we have sent eof
+    int recv_eof;                  // 0 if we have received eof
 
     // receiver's view
-    int r_next_exp_seq;        // seqno of next expected packet
+    int r_next_exp_seq;            // seqno of next expected packet
+    int r_largest_acceptable_seq;   // largest acceptable pkt seqno
     int r_progress;
-    int r_to_print_pkt_seq;   // when rel_output is called this is the pkt it tries to grab from in_pkt_list
+    int r_to_print_pkt_seq;        // when rel_output is called this is the pkt it tries to grab from in_pkt_list
 
 
     // Copied from config_common
@@ -82,8 +83,6 @@ in_pkt_buff_t in_pkt_buff;
 
 /* ===== Functions ===== */
 void send_ack(rel_t* r) {
-    //Update ackno
-    r->r_next_exp_seq++;
 
     //Construct ack
     struct ack_packet sent_ack;
@@ -240,23 +239,63 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
     }
 
     // Received ACK
-//    if (n == ACK_SIZE){
-//    	if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq)
-//    	        r->s_last_ack_recvd = ntohl(pkt->ackno);
-//    }
+    if (n == ACK_SIZE){
+    	if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
+	        r->s_last_ack_recvd = ntohl(pkt->ackno);
+    	}
+    }
 
     // Received data pkt
-
     // detect garbage
+	if (ntohl(pkt->seqno) <= (r->r_next_exp_seq -1) ||
+			ntohl(pkt->seqno) > r->r_largest_acceptable_seq){
+		//outside of receiving window, drop pkt
+		return;
+	}
+
+
+    // add to in_pkt_list
+	in_pkt_t *to_add = (in_pkt_t*) malloc(sizeof(in_pkt_t));
+	to_add->r = r;
+	to_add->pkt = pkt;
+	to_add->seqno = ntohl(pkt->seqno);
+	to_add->size = n;
+	to_add->next = NULL;
+
+	if (in_list_head == NULL) {
+		in_list_head = to_add;
+	}
+	else {
+		in_pkt_t* temp = in_list_head;
+		while (temp->next != NULL) {
+			temp = temp->next;
+		}
+		temp->next = to_add;
+	}
+
+	//check to find the right ack no to send
+	int prev_next_exp_seq = r->r_next_exp_seq;
+	in_pkt_t* temp = in_list_head;
+	while(temp->next != NULL){
+		if (r->r_next_exp_seq == temp->seqno) {
+			r->r_next_exp_seq++;
+			temp = in_list_head;
+		}
+		temp = temp->next;
+	}
+
+	// r_next_exp_seq is the pkt that we are expecting, send ack
+	send_ack(r);
 
 
 
     // print
+	for (int i = prev_next_exp_seq; i <= r_next_exp_seq; i++) {
+		rel_output(r);
+		//r->
+	}
 
-
-
-
-    /*** kevin's code */
+    /*** kevin's code *
     //Update last_ack state
     if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq)
         r->s_last_ack_recvd = ntohl(pkt->ackno);
@@ -309,7 +348,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 }
 }
 
-/*end of kevin's code ******/
+*end of kevin's code ******/
 
 
 /*
