@@ -73,6 +73,12 @@ out_pkt_t *out_list_head = NULL;
 in_pkt_t *in_list_head = NULL;
 
 /* ===== Functions ===== */
+uint16_t min(uint16_t a, size_t b) {
+	if (a < b)
+		return a;
+	return b;
+}
+
 void send_ack(rel_t* r) {
 	//Construct ack
 	struct ack_packet sent_ack;
@@ -248,7 +254,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 	// Verify checksum; abort if necessary
 	uint16_t cksum_recv = pkt->cksum;
 	pkt->cksum = 0x0000;
-	uint16_t cksum_calc = cksum ((void*) pkt, ntohs(pkt->len));
+	uint16_t cksum_calc = cksum ((void*) pkt, min(ntohs(pkt->len), n));
 	if (cksum_recv != cksum_calc) {
 		send_ack(r);
 		return;
