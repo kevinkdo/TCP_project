@@ -246,7 +246,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 
 
 
-/*	// Received ACK
+	/*	// Received ACK
 	if (n == ACK_SIZE){
 		if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
 			r->s_last_ack_recvd = ntohl(pkt->ackno);
@@ -255,11 +255,12 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 		return;
 	}*/
 
-	//Update s_last_ack_recvd
+
+
+	//Update s_last_ack_recvd for sender side
 	if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
 		r->s_last_ack_recvd = ntohl(pkt->ackno);
 	}
-
 
 	// Received data pkt
 	// Discard garbage pkt, out of the receiving window
@@ -270,140 +271,93 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 		return;
 	}
 
-	//Received EOF
-	if(ntohs(pkt->len) == HEADER_SIZE){
-		r->recv_eof = 1;
-	}
+
 
 	//printf("====DATA received seqn : %d\n",ntohl(pkt->seqno));
 
 
-	// add to in_pkt_list
-	in_pkt_t *to_add = (in_pkt_t*) malloc(sizeof(in_pkt_t));
-	to_add->r = r;
-	to_add->pkt = pkt;
-	to_add->seqno = ntohl(pkt->seqno);
-	to_add->size = n;
-	to_add->next = NULL;
+	if(ntohs(pkt->len) >= HEADER_SIZE){
 
-	if (in_list_head == NULL) {
-		in_list_head = to_add;
-		//printf ("hehe1 seq is: %d\n",to_add->seqno);
-	}
-	else {
+
+		//Received EOF
+		if(ntohs(pkt->len) == HEADER_SIZE){
+			r->recv_eof = 1;
+		}
+
+		// add to in_pkt_list
+		in_pkt_t *to_add = (in_pkt_t*) malloc(sizeof(in_pkt_t));
+		to_add->r = r;
+		to_add->pkt = pkt;
+		to_add->seqno = ntohl(pkt->seqno);
+		to_add->size = n;
+		to_add->next = NULL;
+
+		if (in_list_head == NULL) {
+			in_list_head = to_add;
+			//printf ("hehe1 seq is: %d\n",to_add->seqno);
+		}
+		else {
+			in_pkt_t* temp = in_list_head;
+			while (temp != NULL) {
+
+				if(temp->seqno == to_add->seqno){
+					return; //if we have seen the seqno before, return
+				}
+
+				if(temp->next == NULL){
+					temp->next = to_add;
+					break;
+				}
+
+				temp = temp->next;
+			}
+
+			//printf ("hehe2 seq is: %d\n",to_add->seqno);
+		}
+
+		//check to find the right ack no to send
+		int prev_next_exp_seq = r->r_next_exp_seq;
 		in_pkt_t* temp = in_list_head;
-		while (temp != NULL) {
 
-			if(temp->seqno == to_add->seqno){
-				return; //if we have seen the seqno before, return
+		// list has more than one node
+		while(temp != NULL){
+			int found = 0;
+			//printf("entered while\n");
+			if (r->r_next_exp_seq == temp->seqno) {
+				//printf("hehe3 %d\n",temp->seqno);
+				r->r_next_exp_seq++;
+				temp = in_list_head;
+				//printf("kkkk r->r_next_exp_seq is %d\n", r->r_next_exp_seq);
+				found = 1;
+			}
+			if (!found){
+				temp = temp->next;
 			}
 
-			if(temp->next == NULL){
-				temp->next = to_add;
-				break;
-			}
-
-			temp = temp->next;
 		}
 
-		//printf ("hehe2 seq is: %d\n",to_add->seqno);
-	}
 
-	//check to find the right ack no to send
-	int prev_next_exp_seq = r->r_next_exp_seq;
-	in_pkt_t* temp = in_list_head;
+		//printf("Identified ack no to send: %d\n", r->r_next_exp_seq);
 
-	// list has more than one node
-	while(temp != NULL){
-		int found = 0;
-		//printf("entered while\n");
-		if (r->r_next_exp_seq == temp->seqno) {
-			//printf("hehe3 %d\n",temp->seqno);
-			r->r_next_exp_seq++;
-			temp = in_list_head;
-			//printf("kkkk r->r_next_exp_seq is %d\n", r->r_next_exp_seq);
-			found = 1;
+		// r_next_exp_seq is the pkt that we are expecting, send ack
+		send_ack(r);
+
+
+		// print
+		while (prev_next_exp_seq < r->r_next_exp_seq) {
+			//printf("called rel_output\n");
+			rel_output(r);
+			r->r_largest_acceptable_seq++;
+			prev_next_exp_seq++;
+			//printf("after print: prev_next_exp_seq: %d , r->r_next_exp_seq: %d\n", prev_next_exp_seq, r->r_next_exp_seq);
+
 		}
-		if (!found){
-			temp = temp->next;
-		}
-
-	}
-
-
-	//printf("Identified ack no to send: %d\n", r->r_next_exp_seq);
-
-	// r_next_exp_seq is the pkt that we are expecting, send ack
-	send_ack(r);
-
-
-	// print
-	while (prev_next_exp_seq < r->r_next_exp_seq) {
-		//printf("called rel_output\n");
-		rel_output(r);
-		r->r_largest_acceptable_seq++;
-		prev_next_exp_seq++;
-		//printf("after print: prev_next_exp_seq: %d , r->r_next_exp_seq: %d\n", prev_next_exp_seq, r->r_next_exp_seq);
-
 	}
 
 
 
+
 }
-/*** kevin's code *
-    //Update last_ack state
-    if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq)
-        r->s_last_ack_recvd = ntohl(pkt->ackno);
-
-    //Received data packet
-    if (ntohs(pkt->len) >= HEADER_SIZE && ntohl(pkt->seqno) == r->r_next_exp_seq) {
-
-
-        //Received EOF (TODO: move to after SACK?)
-        if (ntohs(pkt->len) == HEADER_SIZE) {
-            r->recv_eof = 1;
-        }
-
-        //check whether should be printed
-        if (ntohl(pkt->seqno) == r->r_next_exp_seq) {
-            //is expected pkt, print data
-            in_pkt_buff.len = n - HEADER_SIZE;
-            in_pkt_buff.progress = 0;
-            in_pkt_buff.data = (void*) pkt->data;
-            rel_output(r);
-
-            //check in_list and if gap is filled output data till 
-            if (in_list_head) {
-              if (in_list_head->seqno == ntohl(pkt->seqno) + 1) {
-                // TODO: print packet in in_list till another gap is detected
-
-              } 
-            }
-
-        } else {
-            //add to in_list, borrowed from add_to_out_list
-            in_pkt_t *to_add = (in_pkt_t*) malloc(sizeof(in_pkt_t));
-            to_add->r = r;
-            to_add->pkt = pkt;
-            to_add->seqno = ntohl(pkt->seqno);
-            to_add->size = n;
-            to_add->next = NULL;
-
-            if (in_list_head == NULL) {
-              in_list_head = to_add;
-            }
-            else {
-              in_pkt_t* temp = in_list_head;
-              while (temp->next != NULL) {
-                 temp = temp->next;
-              }
-              temp->next = to_add;
-        }
-    }
-}
-}
-
- *end of kevin's code ******/
 
 
 /*
