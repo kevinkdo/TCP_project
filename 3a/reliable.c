@@ -259,16 +259,11 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 	}
 
 	// Received data packet
-	if (n >= HEADER_SIZE && ntohs(pkt->len) >= HEADER_SIZE && ntohl(pkt->seqno) == r->r_next_exp_seq) {
+	if (n >= HEADER_SIZE && ntohs(pkt->len) >= HEADER_SIZE) {
 		// Discard garbage pkt, out of the receiving window
 		if (ntohl(pkt->seqno) < r->r_next_exp_seq ||
 			ntohl(pkt->seqno) >= (r->r_next_exp_seq + r->window)) {
 			return;
-		}
-
-		// Received EOF
-		if (ntohs(pkt->len) == HEADER_SIZE) {
-			r->recv_eof = 1;
 		}
 
 		// add to in_pkt_list
@@ -347,6 +342,13 @@ rel_output (rel_t *r)
 			return;
 		}
 
+		//Deal with EOF
+		if (temp->len == 0) {
+			r->r_to_print_pkt_seq++;
+			r->recv_eof = 1;
+			continue;
+		}
+
 		//Try to output
 		conn_output_return = conn_output(r->c, (void*)temp->pkt->data, temp->len - temp->progress);
 
@@ -383,7 +385,9 @@ rel_timer () {
 	//If necessary, close connection
 	rel_t *temp_rel = rel_list;
 	while (temp_rel) {
-		if (temp_rel -> send_eof > 0 && temp_rel -> recv_eof > 0 && temp_rel->s_last_ack_recvd == temp_rel->s_next_out_pkt_seq) {
+		if (temp_rel -> send_eof > 0
+			&& temp_rel -> recv_eof > 0
+			&& temp_rel->s_last_ack_recvd == temp_rel->s_next_out_pkt_seq) {
 			rel_destroy(temp_rel);
 		}
 		temp_rel = temp_rel->next;
