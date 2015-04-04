@@ -246,22 +246,33 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 
 
 
-	// Received ACK
+/*	// Received ACK
 	if (n == ACK_SIZE){
 		if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
 			r->s_last_ack_recvd = ntohl(pkt->ackno);
 			//printf("====received ACK for %d \n",ntohl(pkt->ackno));
 		}
 		return;
+	}*/
+
+	//Update s_last_ack_recvd
+	if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
+		r->s_last_ack_recvd = ntohl(pkt->ackno);
 	}
 
+
 	// Received data pkt
-	// detect garbage
+	// Discard garbage pkt, out of the receiving window
 	if (ntohl(pkt->seqno) <= (r->r_next_exp_seq -1) ||
 			ntohl(pkt->seqno) > r->r_largest_acceptable_seq){
-		//outside of receiving window, drop pkt
+
 		//printf("====Garbage received seqn : %d\n",ntohl(pkt->seqno));
 		return;
+	}
+
+	//Received EOF
+	if(ntohs(pkt->len) == HEADER_SIZE){
+		r->recv_eof = 1;
 	}
 
 	//printf("====DATA received seqn : %d\n",ntohl(pkt->seqno));
@@ -281,17 +292,26 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 	}
 	else {
 		in_pkt_t* temp = in_list_head;
-		while (temp->next != NULL) {
+		while (temp != NULL) {
+
+			if(temp->seqno == to_add->seqno){
+				return; //if we have seen the seqno before, return
+			}
+
+			if(temp->next == NULL){
+				temp->next = to_add;
+				break;
+			}
+
 			temp = temp->next;
 		}
-		temp->next = to_add;
+
 		//printf ("hehe2 seq is: %d\n",to_add->seqno);
 	}
 
 	//check to find the right ack no to send
 	int prev_next_exp_seq = r->r_next_exp_seq;
 	in_pkt_t* temp = in_list_head;
-	//list has only head
 
 	// list has more than one node
 	while(temp != NULL){
@@ -477,7 +497,7 @@ rel_output (rel_t *r)
 		printf("rel_output returned null\n");
 		return;
 	}
-	int conn_output_return = conn_output(r->c, temp->pkt->data, temp->size - HEADER_SIZE - r->r_progress);
+	int conn_output_return = conn_output(r->c, (void*)temp->pkt->data, temp->size - HEADER_SIZE - r->r_progress);
 
 	//Record progress
 	if (conn_output_return > 0) {
