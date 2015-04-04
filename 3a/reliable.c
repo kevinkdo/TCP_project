@@ -155,6 +155,17 @@ void add_to_in_list(rel_t* r, packet_t *pkt, size_t size) {
 	}
 }
 
+//Finds an in_pkt based on seqno
+in_pkt_t* get_in_pkt(uint32_t seqno) {
+	in_pkt_t* temp = in_list_head;
+	while (temp != NULL) {
+		if (temp->seqno == seqno)
+			break;
+		temp = temp->next;
+	}
+	return temp;
+}
+
 /* Creates a new reliable protocol session, returns NULL on failure.
  * Exactly one of c and ss should be NULL.  (ss is NULL when called
  * from rlib.c, while c is NULL when this function is called from
@@ -327,13 +338,7 @@ rel_output (rel_t *r)
 	int conn_output_return = 1;
 	while (conn_output_return > 0) {
 		//Look for packet to output
-		in_pkt_t* temp = in_list_head;
-		while (temp != NULL) {
-			if (temp->seqno == r->r_to_print_pkt_seq) {
-				break;
-			}
-			temp = temp->next;
-		}
+		in_pkt_t* temp = get_in_pkt(r->r_to_print_pkt_seq);
 
 		//Ack for packet we looked for
 		if (temp == NULL) {
@@ -343,7 +348,7 @@ rel_output (rel_t *r)
 		}
 
 		//Try to output
-		int conn_output_return = conn_output(r->c, (void*)temp->pkt->data, temp->len - temp->progress);
+		conn_output_return = conn_output(r->c, (void*)temp->pkt->data, temp->len - temp->progress);
 
 		//Record progress
 		if (conn_output_return > 0) {
