@@ -262,7 +262,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 	if (n >= HEADER_SIZE && ntohs(pkt->len) >= HEADER_SIZE) {
 		// Discard garbage pkt, out of the receiving window
 		if (ntohl(pkt->seqno) < r->r_next_exp_seq ||
-			ntohl(pkt->seqno) > (r->r_next_exp_seq + r->window)) {
+			ntohl(pkt->seqno) >= (r->r_next_exp_seq + r->window)) {
 			return;
 		}
 
