@@ -250,6 +250,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 	pkt->cksum = 0x0000;
 	uint16_t cksum_calc = cksum ((void*) pkt, ntohs(pkt->len));
 	if (cksum_recv != cksum_calc) {
+		send_ack(r);
 		return;
 	}
 
@@ -259,15 +260,22 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 	}
 
 	// Received data packet
-	if (n >= HEADER_SIZE && ntohs(pkt->len) >= HEADER_SIZE) {
+	fprintf(stderr, "pkt->seqno: %d, next_exp: %d\n", ntohl(pkt->seqno), r->r_next_exp_seq);
+	fflush(stderr);
+	if (n >= HEADER_SIZE && ntohs(pkt->len) >= HEADER_SIZE && ntohl(pkt->seqno) == r->r_next_exp_seq) {
 		// Discard garbage pkt, out of the receiving window
 		if (ntohl(pkt->seqno) < r->r_next_exp_seq ||
 			ntohl(pkt->seqno) >= (r->r_next_exp_seq + r->window)) {
+			send_ack(r);
 			return;
 		}
 
 		// add to in_pkt_list
 		add_to_in_list(r, pkt, n);
+
+		// update r_next_exp_seq
+		while (get_in_pkt(r->r_next_exp_seq) != NULL)
+			r->r_next_exp_seq++;
 
 		// Try to output
 		rel_output(r);
@@ -337,7 +345,6 @@ rel_output (rel_t *r)
 
 		//Ack for packet we looked for
 		if (temp == NULL) {
-			r->r_next_exp_seq = r->r_to_print_pkt_seq;
 			send_ack(r);
 			return;
 		}
