@@ -32,13 +32,13 @@ struct reliable_state {
 	// Our data
 
 	// sender's view
-	int s_next_out_pkt_seq;      // seqno of next packet to send
-	int s_last_ack_recvd;        // seqno of last packet acked
+	uint32_t s_next_out_pkt_seq;      // seqno of next packet to send
+	uint32_t s_last_ack_recvd;        // seqno of last packet acked
 	int send_eof;                // 1 if we have sent eof
 
 	// receiver's view
-	int r_next_exp_seq;            // seqno of next expected packet
-	int r_to_print_pkt_seq;        // when rel_output is called this is the pkt it tries to grab from in_pkt_list
+	uint32_t r_next_exp_seq;            // seqno of next expected packet
+	uint32_t r_to_print_pkt_seq;        // when rel_output is called this is the pkt it tries to grab from in_pkt_list
 	int recv_eof;                  // 1 if we have received eof
 
 	// Copied from config_common
@@ -50,7 +50,7 @@ struct reliable_state {
 typedef struct out_pkt {
 	rel_t *r;                   // rel_t associated with this packet
 	packet_t *pkt;              // packet that was sent
-	int seqno;                  // pkt->seqno
+	uint32_t seqno;             // pkt->seqno
 	size_t size;                // UDP length of pkt
 	struct timespec *last_try;  // timespec of last send attempt
 	struct out_pkt *next;       // linked list node
@@ -60,10 +60,10 @@ typedef struct out_pkt {
 typedef struct in_pkt {
 	rel_t *r;                   // rel_t associated with this packet
 	packet_t *pkt;              // packet that was received
-	int seqno;                  // pkt->seqno
+	uint32_t seqno;             // pkt->seqno
 	size_t size;                // UDP length of pkt
-	int progress;				// progress (bytes) made in outputting
-	int len;					// length (bytes) for outputting
+	uint16_t progress;		 	// progress (bytes) made in outputting
+	uint16_t len;				// length (bytes) for outputting
 	struct in_pkt *next;        // linked list node
 } in_pkt_t;
 
@@ -102,7 +102,7 @@ long time_until_timeout (const struct timespec *last, long timeout) {
 }
 
 //Adds a packet to the list of out packets waiting for acks
-void add_to_out_list(rel_t* r, packet_t *pkt, int seqno, size_t size, struct timespec* timespec) {
+void add_to_out_list(rel_t* r, packet_t *pkt, uint32_t seqno, size_t size, struct timespec* timespec) {
 	//Construct out_pkt_t
 	out_pkt_t *to_add = (out_pkt_t*) malloc(sizeof(out_pkt_t));
 	to_add->r = r;
@@ -259,7 +259,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 	}
 
 	// Received data packet
-	if (n >= HEADER_SIZE && ntohs(pkt->len) >= HEADER_SIZE) {
+	if (n >= HEADER_SIZE && ntohs(pkt->len) >= HEADER_SIZE && ntohl(pkt->seqno) == r->r_next_exp_seq) {
 		// Discard garbage pkt, out of the receiving window
 		if (ntohl(pkt->seqno) < r->r_next_exp_seq ||
 			ntohl(pkt->seqno) >= (r->r_next_exp_seq + r->window)) {
