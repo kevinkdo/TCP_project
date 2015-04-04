@@ -35,14 +35,11 @@ struct reliable_state {
 	int s_next_out_pkt_seq;      // seqno of next packet to send
 	int s_last_ack_recvd;        // seqno of last packet acked
 	int send_eof;                // 1 if we have sent eof
-	int recv_eof;                  // 0 if we have received eof
 
 	// receiver's view
 	int r_next_exp_seq;            // seqno of next expected packet
-	int r_largest_acceptable_seq;   // largest acceptable pkt seqno
-	int r_progress;
 	int r_to_print_pkt_seq;        // when rel_output is called this is the pkt it tries to grab from in_pkt_list
-
+	int recv_eof;                  // 1 if we have received eof
 
 	// Copied from config_common
 	int window;             // # of unacknowledged packets in flight
@@ -54,7 +51,7 @@ typedef struct out_pkt {
 	rel_t *r;                   // rel_t associated with this packet
 	packet_t *pkt;              // packet that was sent
 	int seqno;                  // pkt->seqno
-	size_t size;                // length of pkt
+	size_t size;                // UDP length of pkt
 	struct timespec *last_try;  // timespec of last send attempt
 	struct out_pkt *next;       // linked list node
 } out_pkt_t;
@@ -64,26 +61,19 @@ typedef struct in_pkt {
 	rel_t *r;                   // rel_t associated with this packet
 	packet_t *pkt;              // packet that was received
 	int seqno;                  // pkt->seqno
-	size_t size;                // length of pkt
+	size_t size;                // UDP length of pkt
+	int progress;				// progress (bytes) made in outputting
+	int len;					// length (bytes) for outputting
 	struct in_pkt *next;        // linked list node
 } in_pkt_t;
-
-// Struct for received packets (when conn_output cannot output data all in once)
-typedef struct in_pkt_buff {
-	int len;
-	int progress;
-	void *data;
-} in_pkt_buff_t;
 
 /* ===== Global variables ===== */
 rel_t *rel_list;
 out_pkt_t *out_list_head = NULL;
 in_pkt_t *in_list_head = NULL;
-in_pkt_buff_t in_pkt_buff;
 
 /* ===== Functions ===== */
 void send_ack(rel_t* r) {
-
 	//Construct ack
 	struct ack_packet sent_ack;
 	sent_ack.cksum = 0x0000;
@@ -122,7 +112,7 @@ void add_to_out_list(rel_t* r, packet_t *pkt, int seqno, size_t size, struct tim
 	to_add->next = NULL;
 	to_add->last_try = timespec;
 
-	//Add to list
+	//Add to out list
 	if (out_list_head == NULL) {
 		out_list_head = to_add;
 	}
@@ -131,6 +121,37 @@ void add_to_out_list(rel_t* r, packet_t *pkt, int seqno, size_t size, struct tim
 		while (temp->next != NULL)
 			temp = temp->next;
 		temp->next = to_add;
+	}
+}
+
+//Adds a packet to the list of in packets
+void add_to_in_list(rel_t* r, packet_t *pkt, size_t size) {
+	//Construct in_pkt_t
+	in_pkt_t *to_add = (in_pkt_t*) malloc(sizeof(in_pkt_t));
+	to_add->r = r;
+	to_add->pkt = pkt;
+	to_add->seqno = ntohl(pkt->seqno);
+	to_add->progress = 0;
+	to_add->len = ntohs(pkt->len) - HEADER_SIZE;
+	to_add->size = size;
+	to_add->next = NULL;
+
+	//Add to in list
+	if (in_list_head == NULL) {
+		in_list_head = to_add;
+	}
+	else {
+		in_pkt_t* temp = in_list_head;
+		while (temp != NULL) {
+			if (temp->seqno == to_add->seqno) {
+				return;
+			}
+			if (temp->next == NULL) {
+				temp->next = to_add;
+				break;
+			}
+			temp = temp->next;
+		}
 	}
 }
 
@@ -164,18 +185,19 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
 	rel_list = r;
 
 	//Our initialization
+	// sender's view
 	r->s_next_out_pkt_seq = 1;
-	r->r_next_exp_seq = 1;
 	r->s_last_ack_recvd = 1;
+	r->send_eof = 0;
 
+	// receiver's view
+	r->r_next_exp_seq = 1;
+	r->r_to_print_pkt_seq = 1;
+	r->recv_eof = 0;
+
+	// Copied from config_common
 	r->window = cc->window;
 	r->timeout = cc->timeout;
-	r->r_largest_acceptable_seq = 1 + r->window;
-	r->r_progress = 0;
-	r->r_to_print_pkt_seq = 1;
-
-	r->send_eof = 0;
-	r->recv_eof = 0;
 
 	return r;
 }
@@ -206,37 +228,13 @@ void
 rel_demux (const struct config_common *cc,
 		const struct sockaddr_storage *ss,
 		packet_t *pkt, size_t len)
-{
-	//  /* demultiplex called when in server mode,
-	//   * if seq == 1 from a new sockaddr_storage, invoke rel_create else receive
-	//   */
-	//  int is_new = 1;
-	//  rel_t *curr = rel_list;
-	//
-	//  while(curr){
-	//      conn_t * c = curr->c;
-	//      if( (pkt->seqno != 1) && addreq( ss, &( c->peer ) )){
-	//          //is existing connection
-	//          is_new = 0;
-	//          rel_recvpkt(curr, pkt, len);
-	//      }
-	//      curr = curr -> next;
-	//  }
-	//  if (is_new){
-	//      //create new rel_t and receive
-	//      rel_t * r = rel_create(NULL, ss, cc);
-	//      rel_recvpkt(r, pkt, len);
-	//  }
-}
+{}
 
 // Process a received packet
 void
 rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 {
 	// Verify checksum; abort if necessary
-
-
-
 	uint16_t cksum_recv = pkt->cksum;
 	pkt->cksum = 0x0000;
 	uint16_t cksum_calc = cksum ((void*) pkt, ntohs(pkt->len));
@@ -244,141 +242,31 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 		return;
 	}
 
-
-
-	/*	// Received ACK
-	if (n == ACK_SIZE){
-		if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
-			r->s_last_ack_recvd = ntohl(pkt->ackno);
-			//printf("====received ACK for %d \n",ntohl(pkt->ackno));
-		}
-		return;
-	}*/
-
-
-
-	//Update s_last_ack_recvd for sender side
+	// Update s_last_ack_recvd for sender state
 	if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
 		r->s_last_ack_recvd = ntohl(pkt->ackno);
 	}
 
-	// Received data pkt
-	// Discard garbage pkt, out of the receiving window
-	if (ntohl(pkt->seqno) <= (r->r_next_exp_seq -1) ||
-			ntohl(pkt->seqno) > r->r_largest_acceptable_seq){
+	// Received data packet
+	if (n >= HEADER_SIZE && ntohs(pkt->len) >= HEADER_SIZE) {
+		// Discard garbage pkt, out of the receiving window
+		if (ntohl(pkt->seqno) < r->r_next_exp_seq ||
+			ntohl(pkt->seqno) > (r->r_next_exp_seq + r->window)) {
+			return;
+		}
 
-		//printf("====Garbage received seqn : %d\n",ntohl(pkt->seqno));
-		return;
-	}
-
-
-
-	//printf("====DATA received seqn : %d\n",ntohl(pkt->seqno));
-
-
-	if(ntohs(pkt->len) >= HEADER_SIZE){
-
-
-		//Received EOF
-		if(ntohs(pkt->len) == HEADER_SIZE){
+		// Received EOF
+		if (ntohs(pkt->len) == HEADER_SIZE) {
 			r->recv_eof = 1;
 		}
 
 		// add to in_pkt_list
-		in_pkt_t *to_add = (in_pkt_t*) malloc(sizeof(in_pkt_t));
-		to_add->r = r;
-		to_add->pkt = pkt;
-		to_add->seqno = ntohl(pkt->seqno);
-		to_add->size = n;
-		to_add->next = NULL;
+		add_to_in_list(r, pkt, n);
 
-		if (in_list_head == NULL) {
-			in_list_head = to_add;
-			//printf ("hehe1 seq is: %d\n",to_add->seqno);
-		}
-		else {
-			in_pkt_t* temp = in_list_head;
-			while (temp != NULL) {
-
-				if(temp->seqno == to_add->seqno){
-					return; //if we have seen the seqno before, return
-				}
-
-				if(temp->next == NULL){
-					temp->next = to_add;
-					break;
-				}
-
-				temp = temp->next;
-			}
-
-			//printf ("hehe2 seq is: %d\n",to_add->seqno);
-		}
-
-		//check to find the right ack no to send
-		int prev_next_exp_seq = r->r_next_exp_seq;
-		in_pkt_t* temp = in_list_head;
-
-		// list has more than one node
-		while(temp != NULL){
-			int found = 0;
-			//printf("entered while\n");
-			if (r->r_next_exp_seq == temp->seqno) {
-				//printf("hehe3 %d\n",temp->seqno);
-				r->r_next_exp_seq++;
-				temp = in_list_head;
-				//printf("kkkk r->r_next_exp_seq is %d\n", r->r_next_exp_seq);
-				found = 1;
-			}
-			if (!found){
-				temp = temp->next;
-			}
-
-		}
-
-
-		//printf("Identified ack no to send: %d\n", r->r_next_exp_seq);
-
-		// r_next_exp_seq is the pkt that we are expecting, send ack
-		send_ack(r);
-
-
-		// print
-		while (prev_next_exp_seq < r->r_next_exp_seq) {
-			//printf("called rel_output\n");
-			rel_output(r);
-			r->r_largest_acceptable_seq++;
-			prev_next_exp_seq++;
-			//printf("after print: prev_next_exp_seq: %d , r->r_next_exp_seq: %d\n", prev_next_exp_seq, r->r_next_exp_seq);
-
-		}
+		// Try to output
+		rel_output(r);
 	}
-
-
-
-
 }
-
-
-/*
-void
-insert_into_sorted_in_list(in_pkt_t *to_add) //LOOK HERE FIRST FOR BUGS
-{
-    if (!in_list_head) {
-        in_list_head = to_add;
-    } else {
-        in_pkt_t* curr = in_list_head;
-        in_pkt_t* next; 
-        while (curr->next != NULL && to_add->seqno >= curr->seqno) {
-            curr = curr->next;
-        }
-        next = curr->next;
-        curr->next = to_add;
-        to_add->next = next; 
-    }
-    return;
-}*/
-
 
 //TODO To conserve packets, a sender should not send more than one unacknowledged Data frame with less than the maximum number of packets (500), somewhat like TCP's Nagle algorithm.
 // Read user input and send a packet
@@ -436,34 +324,38 @@ rel_read (rel_t *s)
 void
 rel_output (rel_t *r)
 {
-	//printf("to print packet seqno: %d\n", r->r_to_print_pkt_seq);
-	//Output
-	in_pkt_t* temp = in_list_head;
-	while(temp != NULL) {
-		if (r->r_to_print_pkt_seq == temp->seqno) {
-			break;
+	int conn_output_return = 1;
+	while (conn_output_return > 0) {
+		//Look for packet to output
+		in_pkt_t* temp = in_list_head;
+		while (temp != NULL) {
+			if (temp->seqno == r->r_to_print_pkt_seq) {
+				break;
+			}
+			temp = temp->next;
 		}
-		temp = temp->next;
-	}
 
-	//pkt with seqn == r_to_print_pkt_seq not found
-	if (temp == NULL) {
-		printf("rel_output returned null\n");
-		return;
-	}
-	int conn_output_return = conn_output(r->c, (void*)temp->pkt->data, temp->size - HEADER_SIZE - r->r_progress);
+		//Ack for packet we looked for
+		if (temp == NULL) {
+			r->r_next_exp_seq = r->r_to_print_pkt_seq;
+			send_ack(r);
+			return;
+		}
 
-	//Record progress
-	if (conn_output_return > 0) {
-		r->r_progress += conn_output_return;
-	}
-	if (conn_output_return == 0) {}
-	if (conn_output_return == -1) {}
+		//Try to output
+		int conn_output_return = conn_output(r->c, (void*)temp->pkt->data, temp->len - temp->progress);
 
-	//If done
-	if (r->r_progress == temp->size - HEADER_SIZE) {
-		r->r_to_print_pkt_seq++;
-		r->r_progress = 0;
+		//Record progress
+		if (conn_output_return > 0) {
+			temp->progress += conn_output_return;
+		}
+		if (conn_output_return == 0) {}
+		if (conn_output_return == -1) {}
+
+		//If done with this packet, move on to next packet
+		if (temp->progress == temp->len) {
+			r->r_to_print_pkt_seq++;
+		}
 	}
 }
 
