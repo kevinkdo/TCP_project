@@ -172,7 +172,7 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
 	r->timeout = cc->timeout;
 	r->r_largest_acceptable_seq = 1 + r->window;
 	r->r_progress = 0;
-    r->r_to_print_pkt_seq = 1;
+	r->r_to_print_pkt_seq = 1;
 
 	r->send_eof = 0;
 	r->recv_eof = 0;
@@ -234,6 +234,9 @@ void
 rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 {
 	// Verify checksum; abort if necessary
+
+
+
 	uint16_t cksum_recv = pkt->cksum;
 	pkt->cksum = 0x0000;
 	uint16_t cksum_calc = cksum ((void*) pkt, ntohs(pkt->len));
@@ -241,12 +244,15 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 		return;
 	}
 
+
+
 	// Received ACK
 	if (n == ACK_SIZE){
 		if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
 			r->s_last_ack_recvd = ntohl(pkt->ackno);
-            return;
+			//printf("====received ACK for %d \n",ntohl(pkt->ackno));
 		}
+		return;
 	}
 
 	// Received data pkt
@@ -254,8 +260,11 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 	if (ntohl(pkt->seqno) <= (r->r_next_exp_seq -1) ||
 			ntohl(pkt->seqno) > r->r_largest_acceptable_seq){
 		//outside of receiving window, drop pkt
+		//printf("====Garbage received seqn : %d\n",ntohl(pkt->seqno));
 		return;
 	}
+
+	//printf("====DATA received seqn : %d\n",ntohl(pkt->seqno));
 
 
 	// add to in_pkt_list
@@ -268,6 +277,7 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 
 	if (in_list_head == NULL) {
 		in_list_head = to_add;
+		//printf ("hehe1 seq is: %d\n",to_add->seqno);
 	}
 	else {
 		in_pkt_t* temp = in_list_head;
@@ -275,32 +285,46 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 			temp = temp->next;
 		}
 		temp->next = to_add;
+		//printf ("hehe2 seq is: %d\n",to_add->seqno);
 	}
 
 	//check to find the right ack no to send
 	int prev_next_exp_seq = r->r_next_exp_seq;
 	in_pkt_t* temp = in_list_head;
-	while(temp->next != NULL){
+	//list has only head
+
+	// list has more than one node
+	while(temp != NULL){
+		int found = 0;
+		//printf("entered while\n");
 		if (r->r_next_exp_seq == temp->seqno) {
+			//printf("hehe3 %d\n",temp->seqno);
 			r->r_next_exp_seq++;
 			temp = in_list_head;
-			printf("%d", r->r_next_exp_seq);
+			//printf("kkkk r->r_next_exp_seq is %d\n", r->r_next_exp_seq);
+			found = 1;
 		}
-		temp = temp->next;
+		if (!found){
+			temp = temp->next;
+		}
+
 	}
 
-    printf("Identified ack no to send: %d\n", r->r_next_exp_seq);
 
-    // r_next_exp_seq is the pkt that we are expecting, send ack
-    send_ack(r);
+	//printf("Identified ack no to send: %d\n", r->r_next_exp_seq);
+
+	// r_next_exp_seq is the pkt that we are expecting, send ack
+	send_ack(r);
 
 
 	// print
-	while (prev_next_exp_seq <= r->r_next_exp_seq) {
+	while (prev_next_exp_seq < r->r_next_exp_seq) {
+		//printf("called rel_output\n");
 		rel_output(r);
-		printf("called rel_output\n");
-        printf("prev_next_exp_seq: %d , r->r_next_exp_seq: %d\n", prev_next_exp_seq, r->r_next_exp_seq);
+		r->r_largest_acceptable_seq++;
 		prev_next_exp_seq++;
+		//printf("after print: prev_next_exp_seq: %d , r->r_next_exp_seq: %d\n", prev_next_exp_seq, r->r_next_exp_seq);
+
 	}
 
 
@@ -438,7 +462,7 @@ rel_read (rel_t *s)
 void
 rel_output (rel_t *r)
 {
-    printf("to print packet seqno: %d\n", r->r_to_print_pkt_seq);
+	//printf("to print packet seqno: %d\n", r->r_to_print_pkt_seq);
 	//Output
 	in_pkt_t* temp = in_list_head;
 	while(temp != NULL) {
@@ -447,10 +471,13 @@ rel_output (rel_t *r)
 		}
 		temp = temp->next;
 	}
-    if (temp == NULL) {
-        return;
-    }
-	int conn_output_return = conn_output(r->c, temp->pkt->data, temp->size - r->r_progress);
+
+	//pkt with seqn == r_to_print_pkt_seq not found
+	if (temp == NULL) {
+		printf("rel_output returned null\n");
+		return;
+	}
+	int conn_output_return = conn_output(r->c, temp->pkt->data, temp->size - HEADER_SIZE - r->r_progress);
 
 	//Record progress
 	if (conn_output_return > 0) {
@@ -459,9 +486,10 @@ rel_output (rel_t *r)
 	if (conn_output_return == 0) {}
 	if (conn_output_return == -1) {}
 
-	//If done, send ack
-	if (r->r_progress == temp->size) {
+	//If done
+	if (r->r_progress == temp->size - HEADER_SIZE) {
 		r->r_to_print_pkt_seq++;
+		r->r_progress = 0;
 	}
 }
 
