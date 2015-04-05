@@ -339,6 +339,8 @@ int connect_to (int dgram, const struct sockaddr_storage *ss);
 #define RECEIVER 2
 #endif
 
+
+# define NEED_CLOCK_GETTIME 1
 #ifndef CLOCK_REALTIME
 # define NEED_CLOCK_GETTIME 1
 # define CLOCK_REALTIME 0
