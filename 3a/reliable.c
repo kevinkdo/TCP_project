@@ -396,7 +396,8 @@ rel_timer () {
 	while (temp_rel) {
 		if (temp_rel -> send_eof > 0
 			&& temp_rel -> recv_eof > 0
-			&& temp_rel->s_last_ack_recvd == temp_rel->s_next_out_pkt_seq) {
+			&& temp_rel->s_last_ack_recvd == temp_rel->s_next_out_pkt_seq
+			&& temp_rel->r_to_print_pkt_seq == temp_rel->r_next_exp_seq) {
 			rel_destroy(temp_rel);
 		}
 		temp_rel = temp_rel->next;
