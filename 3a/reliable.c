@@ -266,14 +266,17 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 	}
 
 	// Received data packet
-	fprintf(stderr, "pkt->seqno: %d, next_exp: %d\n", ntohl(pkt->seqno), r->r_next_exp_seq);
-	fflush(stderr);
 	if (n >= HEADER_SIZE && ntohs(pkt->len) >= HEADER_SIZE && ntohl(pkt->seqno) == r->r_next_exp_seq) {
 		// Discard garbage pkt, out of the receiving window
 		if (ntohl(pkt->seqno) < r->r_next_exp_seq ||
 			ntohl(pkt->seqno) >= (r->r_next_exp_seq + r->window)) {
 			send_ack(r);
 			return;
+		}
+
+		//Received EOF
+		if (ntohs(pkt->len) == HEADER_SIZE) {
+			r->recv_eof = 1;
 		}
 
 		// add to in_pkt_list
@@ -353,13 +356,6 @@ rel_output (rel_t *r)
 		if (temp == NULL) {
 			send_ack(r);
 			return;
-		}
-
-		//Deal with EOF
-		if (temp->len == 0) {
-			r->r_to_print_pkt_seq++;
-			r->recv_eof = 1;
-			continue;
 		}
 
 		//Try to output
