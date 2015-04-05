@@ -38,6 +38,9 @@ struct reliable_state {
 	// Copied from config_common
 	int window;             // # of unacknowledged packets in flight
 	int timeout;            // Retransmission timeout in milliseconds
+
+	//congestion control 
+	int ssthresh; 		// slow start threshold 
 };
 rel_t *rel_list;
 
@@ -301,12 +304,29 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 	}
 }
 
+uint32_t 
+reno (rel_t *r) {
+
+	//slow start	
+	if (r->ssthresh > r->window) {
+		r->window *= 2; 		//slow start 
+	} else {
+		r->window += 1; 		//AIMD
+	}
+
+	return r->window;
+	//aimd
+
+	//need to change ssthresh value at some point 
+
+}
 
 void
 rel_read (rel_t *s)
 {
 	if (s->c->sender_receiver == RECEIVER) {
 		send_eof(s);
+		//instructions say after the first call can simply return for later calls if it is a receiver
 	}
 	else {
 		//Prepare packet
