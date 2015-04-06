@@ -499,12 +499,52 @@ rel_output (rel_t *r)
 	}
 }
 
+void
+clean_in_pkt_list(){
+	//clean in_pkt_list
+	in_pkt_t* curr = in_list_head;
+	in_pkt_t* prev = NULL;
+	while(curr){
+		if ( curr-> seqno < curr -> r -> r_to_print_pkt_seq ){
+			//already printed pkt, remove
+			if (!prev) {
+				// remove head
+				in_pkt_t* to_free = curr;
+				in_list_head = curr -> next;
+				curr = in_list_head;
+				free(to_free);
+
+			} else {
+				in_pkt_t* to_free = curr;
+				curr = curr -> next;
+				prev -> next = curr;
+				free(to_free);
+			}
+
+		} else {
+			prev = curr;
+			curr = curr -> next;
+		}
+	} 
+}
+
+void 
+remove_from_out_pkt_list(out_pkt_t* target){
+
+}
+
 // Retransmit any packets that need to be retransmitted
 void
 rel_timer () {
 	out_pkt_t *temp = out_list_head;
 	while (temp) {
-		//If unacked + window is satisfied + timeout, resend
+
+		//clean_out_pkt_list
+		if (temp -> seqno < temp -> r -> s_last_ack_recvd){
+			remove_from_out_pkt_list(temp);
+		}
+
+		// If unacked + window is satisfied + timeout, resend
 		if (temp->seqno >= temp->r->s_last_ack_recvd &&
 				temp->seqno - temp->r->s_last_ack_recvd < min32(temp->r->s_cwnd, temp->r->s_rwnd) &&
 				time_until_timeout(temp->last_try, (long) temp->r->timeout) == 0)
@@ -516,6 +556,9 @@ rel_timer () {
 		}
 		temp = temp->next;
 	}
+
+	//clean in_pkt_list
+	clean_in_pkt_list();
 
 	//If necessary, close connection
 	rel_t *temp_rel = rel_list;
