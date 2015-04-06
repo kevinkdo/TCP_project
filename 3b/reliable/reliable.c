@@ -92,7 +92,7 @@ void send_ack(rel_t* r) {
 	sent_ack.cksum = 0x0000;
 	sent_ack.len = htons(ACK_SIZE);
 	sent_ack.ackno = htonl(r->r_next_exp_seq);
-	sent_ack.rwnd = htonl(conn_bufspace(r->c));//TODO
+	sent_ack.rwnd = htonl(conn_bufspace(r->c)/PACKET_SIZE);//TODO
 	sent_ack.cksum = cksum ((void*) &sent_ack, ACK_SIZE);
 
 	//Send ack
@@ -147,7 +147,7 @@ void send_eof(rel_t* s) {
 		to_send->ackno = htonl(s->r_next_exp_seq);
 		to_send->seqno = htonl(s->s_next_out_pkt_seq);
 		to_send->len = htons(HEADER_SIZE);
-		to_send->rwnd = htonl(conn_bufspace(s->c));//TODO
+		to_send->rwnd = htonl(conn_bufspace(s->c)/PACKET_SIZE);//TODO
 		to_send->cksum = cksum ((void*) to_send, HEADER_SIZE);
 
 		//Send and add to list
@@ -234,6 +234,7 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
 	r->s_last_ack_recvd = 1;
 	r->send_eof = 0;
 	r->s_cwnd = 1;
+	r->s_rwnd = 0;
 	r->s_ssthresh = cc->window;
 	r->s_timeout = 0;
 	r->s_timeout_reset = 0;
@@ -281,24 +282,32 @@ rel_demux (const struct config_common *cc,
 void 
 update_window_size (rel_t *r) {
 
+	if (r->s_timeout_reset == 1) {
+		r->s_dup_acks = 0;
+		r->s_timeout = 1;
+	}
+	if (r->s_dup_acks_reset == 1) {
+		r->s_timeout = 0; 
+		r->s_dup_acks = 1;
+	}
 	if (r->s_dup_acks == 1) {
 		if (r->s_dup_acks_reset == 1) {
 			r->s_ssthresh = r->s_cwnd/2;
 			r->s_cwnd = r->s_ssthresh;
 			r->s_dup_acks_reset = 0;
 		} else {
-			r->s_cwnd += MSS;
+			r->s_cwnd += 1;
 		}
 		
 	} else if (r->s_timeout == 1) {
 		if (r->s_timeout_reset == 1) {
-			r->s_cwnd = MSS;
+			r->s_cwnd = 1;
 			r->s_ssthresh = r->s_cwnd/2;
 			r->s_timeout_reset = 0;
 		} else if (r->s_ssthresh > r->s_cwnd) {
 			r->s_cwnd *= 2; 		//slow start 
 		} else {
-			r->s_cwnd+= MSS; 		//AIMD
+			r->s_cwnd+= 1; 		//AIMD
 		}
 
 	}
@@ -326,12 +335,12 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 			if (r->s_dup_ack_count == 3) {
 				r->s_dup_acks_reset = 1;
 				r->s_dup_ack_count = 0;
-				r->s_dup_acks = 1; 
 			}
 		} else {
 			r->s_dup_ack_count = 0; 
 		}
 		r->s_last_ack_recvd = ntohl(pkt->ackno);
+		r->s_rwnd = r->r_rwnd; //not sure where to put 
 	}
 	
 	//update window size
@@ -467,7 +476,6 @@ rel_timer () {
 			conn_sendpkt (temp->r->c, temp->pkt, temp->size);
 			clock_gettime(CLOCK_MONOTONIC, temp->last_try);
 			temp->r->s_timeout_reset = 1;
-			temp->r->s_timeout = 1;
 			update_window_size(temp->r);
 		}
 		temp = temp->next;
