@@ -234,7 +234,7 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
 	r->s_last_ack_recvd = 1;
 	r->send_eof = 0;
 	r->s_cwnd = 1;
-	r->s_rwnd = 0;
+	r->s_rwnd = 1; //not sure if this is correct initial value 
 	r->s_ssthresh = cc->window;
 	r->s_timeout = 0;
 	r->s_timeout_reset = 0;
@@ -282,7 +282,7 @@ rel_demux (const struct config_common *cc,
 void 
 update_window_size (rel_t *r) {
 
-	if (r->s_timeout_reset == 1) {
+	if (r->s_timeout_reset == 1) { 
 		r->s_dup_acks = 0;
 		r->s_timeout = 1;
 	}
