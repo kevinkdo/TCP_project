@@ -15,9 +15,9 @@
 
 #include "rlib.h"
 
-#define ACK_SIZE 16
+#define ACK_SIZE 12
 #define PACKET_SIZE 1016
-#define HEADER_SIZE 20
+#define HEADER_SIZE 16
 #define MSS 1000
 
 /* ===== Structs ===== */
