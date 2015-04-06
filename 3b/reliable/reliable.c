@@ -268,13 +268,6 @@ rel_destroy (rel_t *r)
 }
 
 
-void
-rel_demux (const struct config_common *cc,
-		 const struct sockaddr_storage *ss,
-		 packet_t *pkt, size_t len)
-{}
-
-
 void 
 update_window_size (rel_t *r) {
 
@@ -286,19 +279,28 @@ update_window_size (rel_t *r) {
 		r->s_timeout = 0; 
 		r->s_dup_acks = 1;
 	}
-	if (r->s_dup_acks == 1) {
+
+	if (r -> s_dup_acks == 0 && r -> s_timeout == 0 ){
+		r -> s_cwnd += 1; //AI
+
+	} else if (r->s_dup_acks == 1) {
 		if (r->s_dup_acks_reset == 1) {
 			r->s_ssthresh = r->s_cwnd/2;
 			r->s_cwnd = r->s_ssthresh;
 			r->s_dup_acks_reset = 0;
 		} else {
 			r->s_cwnd += 1;
+		} 
+
+		//end of recovery from dup acks
+		if (r -> s_cwnd >= r -> s_ssthresh){
+			r -> s_dup_acks = 0;
 		}
 		
 	} else if (r->s_timeout == 1) {
 		if (r->s_timeout_reset == 1) {
-			r->s_cwnd = 1;
 			r->s_ssthresh = r->s_cwnd/2;
+			r->s_cwnd = 1;
 			r->s_timeout_reset = 0;
 		} else if (r->s_ssthresh > r->s_cwnd) {
 			r->s_cwnd *= 2; 		//slow start 
@@ -306,6 +308,10 @@ update_window_size (rel_t *r) {
 			r->s_cwnd+= 1; 		//AIMD
 		}
 
+		//end of recovery from timeout
+		if (r -> s_cwnd >= r -> s_ssthresh) {
+			r -> s_timeout = 0;
+		}
 	}
 }
 
@@ -485,3 +491,9 @@ rel_timer () {
 		rel_destroy(temp_rel);
 	}
 }
+
+void
+rel_demux (const struct config_common *cc,
+		 const struct sockaddr_storage *ss,
+		 packet_t *pkt, size_t len)
+{}
