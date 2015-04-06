@@ -29,8 +29,8 @@ struct reliable_state {
 	// sender's view
 	uint32_t s_next_out_pkt_seq;      // seqno of next packet to send
 	uint32_t s_last_ack_recvd;        // seqno of last packet acked
-	int s_cwnd;						  // congestion window(based on timeout, acks, etc.)
-	int s_rwnd;						  // what receiver says window should be window 
+	uint32_t s_cwnd;						  // congestion window(based on timeout, acks, etc.)
+	uint32_t s_rwnd;						  // what receiver says window should be window 
 	int s_dup_acks;					  // currently recovering from dup acks
 	int s_dup_ack_count;			  // keeps track of how many duplicate acks so far 
 	int s_dup_acks_reset;			  // dup ack discovered
@@ -41,7 +41,7 @@ struct reliable_state {
 	// receiver's view
 	uint32_t r_next_exp_seq;            // seqno of next expected packet
 	uint32_t r_to_print_pkt_seq;        // when rel_output is called this is the pkt it tries to grab from in_pkt_list
-	int r_rwnd;							// receiver calculates to send in an ack to sender 
+	uint32_t r_rwnd;							// receiver calculates to send in an ack to sender 
 	int recv_eof;                  // 1 if we have received eof
 
 	// Copied from config_common
