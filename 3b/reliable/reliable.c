@@ -529,21 +529,13 @@ clean_in_pkt_list(){
 	} 
 }
 
-void 
-remove_from_out_pkt_list(out_pkt_t* target){
-
-}
 
 // Retransmit any packets that need to be retransmitted
 void
 rel_timer () {
 	out_pkt_t *temp = out_list_head;
+	out_pkt_t *prev = NULL;
 	while (temp) {
-
-		//clean_out_pkt_list
-		if (temp -> seqno < temp -> r -> s_last_ack_recvd){
-			remove_from_out_pkt_list(temp);
-		}
 
 		// If unacked + window is satisfied + timeout, resend
 		if (temp->seqno >= temp->r->s_last_ack_recvd &&
@@ -555,7 +547,29 @@ rel_timer () {
 			temp->r->s_timeout_reset = 1;
 			update_window_size(temp->r);
 		}
-		temp = temp->next;
+
+		//remove the pkt if needed, otherwise just move on
+		if (temp -> seqno < temp -> r -> s_last_ack_recvd){
+			if (!prev) {
+				// remove head
+				out_pkt_t* to_free = temp;
+				out_list_head = temp -> next;
+				temp = out_list_head;
+				free(to_free);
+			} else {
+				// remove node
+				out_pkt_t* to_free = temp;
+				temp = temp -> next;
+				prev -> next = temp;
+				free(to_free);
+			}
+
+		} else {
+			//nothing to remove, move on
+			prev = temp;
+			temp = temp->next;
+		}
+
 	}
 
 	//clean in_pkt_list
