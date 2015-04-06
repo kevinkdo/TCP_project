@@ -26,6 +26,8 @@ struct reliable_state {
 	conn_t *c;			/* This is the connection object */
 
 	/* Add your own data fields below this */
+	struct timespec *start;
+
 	// sender's view
 	uint32_t s_next_out_pkt_seq;      // seqno of next packet to send
 	uint32_t s_last_ack_recvd;        // seqno of last packet acked
@@ -76,6 +78,29 @@ out_pkt_t *out_list_head = NULL;
 in_pkt_t *in_list_head = NULL;
 
 /* ===== Functions ===== */
+/* From https://tint2.googlecode.com/svn/trunk/src/util/timer.c */
+int timespec_subtract(struct timespec* result, struct timespec* x, struct timespec* y)
+{
+	/* Perform the carry for the later subtraction by updating y. */
+	if (x->tv_nsec < y->tv_nsec) {
+		int nsec = (y->tv_nsec - x->tv_nsec) / 1000000000 + 1;
+		y->tv_nsec -= 1000000000 * nsec;
+		y->tv_sec += nsec;
+	}
+	if (x->tv_nsec - y->tv_nsec > 1000000000) {
+		int nsec = (x->tv_nsec - y->tv_nsec) / 1000000000;
+		y->tv_nsec += 1000000000 * nsec;
+		y->tv_sec -= nsec;
+	}
+
+	/* Compute the time remaining to wait. tv_nsec is certainly positive. */
+	result->tv_sec = x->tv_sec - y->tv_sec;
+	result->tv_nsec = x->tv_nsec - y->tv_nsec;
+
+	/* Return 1 if result is negative. */
+	return x->tv_sec < y->tv_sec;
+}
+
 uint16_t min(uint16_t a, size_t b) {
 	if (a < b)
 		return a;
@@ -256,6 +281,9 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
 	if (r->c->sender_receiver == RECEIVER) {
 		send_eof(r);
 	}
+
+	r->start = (struct timespec*) malloc(sizeof(struct timespec));
+	clock_gettime (CLOCK_MONOTONIC, r->start);
 	return r;
 }
 
@@ -265,6 +293,13 @@ rel_destroy (rel_t *r)
 	conn_destroy (r->c);
 
 	/* Free any other allocated memory here */
+
+	struct timespec* end = (struct timespec*) malloc(sizeof(struct timespec));
+	clock_gettime (CLOCK_MONOTONIC, end);
+	struct timespec* diff = (struct timespec*) malloc(sizeof(struct timespec));
+	timespec_subtract(diff, end, r->start);
+	fprintf(stderr, "Time elapsed: %ld secs and %ld nanoseconds", diff->tv_sec, diff->tv_nsec);
+	fflush(stderr);
 }
 
 
