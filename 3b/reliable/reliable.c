@@ -19,7 +19,7 @@
 #define PACKET_SIZE 1016
 #define HEADER_SIZE 16
 #define MSS 1000
-#define TIMEOUT 300
+#define TIMEOUT 100
 
 /* ===== Structs ===== */
 struct reliable_state {
@@ -120,7 +120,7 @@ void send_ack(rel_t* r) {
 	sent_ack.cksum = 0x0000;
 	sent_ack.len = htons(ACK_SIZE);
 	sent_ack.ackno = htonl(r->r_next_exp_seq);
-	sent_ack.rwnd = htonl(conn_bufspace(r->c)/MSS);
+	sent_ack.rwnd = htonl(25);//sent_ack.rwnd = htonl(conn_bufspace(r->c)/MSS);
 	sent_ack.cksum = cksum ((void*) &sent_ack, ACK_SIZE);
 
 	//Send ack
@@ -260,8 +260,8 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
 	// sender's view
 	r->s_next_out_pkt_seq = 1;
 	r->s_last_ack_recvd = 1;
-	r->s_cwnd = 1;
-	r->s_rwnd = cc->window;
+	r->s_cwnd = 25;
+	r->s_rwnd = 25;
 	r->s_ssthresh = cc->window;
 	r->s_timeout = 0;
 	r->s_timeout_reset = 0;
@@ -544,7 +544,7 @@ rel_timer () {
 		{
 			conn_sendpkt (temp->r->c, temp->pkt, temp->size);
 			clock_gettime(CLOCK_MONOTONIC, temp->last_try);
-			temp->r->s_timeout_reset = 1;
+			//temp->r->s_timeout_reset = 1;
 			update_window_size(temp->r);
 		}
 
