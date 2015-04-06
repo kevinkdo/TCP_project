@@ -19,6 +19,7 @@
 #define PACKET_SIZE 1016
 #define HEADER_SIZE 16
 #define MSS 1000
+#define TIMEOUT 300
 
 /* ===== Structs ===== */
 struct reliable_state {
@@ -275,7 +276,7 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
 	r->recv_eof = 0;
 
 	// Copied from config_common
-	r->timeout = cc->timeout;
+	r->timeout = TIMEOUT;
 
 	//Send eof at beginning if RECEIVER
 	if (r->c->sender_receiver == RECEIVER) {
