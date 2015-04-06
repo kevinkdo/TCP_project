@@ -18,6 +18,7 @@
 #define ACK_SIZE 16
 #define PACKET_SIZE 1016
 #define HEADER_SIZE 20
+#define MSS 1000
 
 /* ===== Structs ===== */
 struct reliable_state {
@@ -28,11 +29,19 @@ struct reliable_state {
 	// sender's view
 	uint32_t s_next_out_pkt_seq;      // seqno of next packet to send
 	uint32_t s_last_ack_recvd;        // seqno of last packet acked
+	int s_cwnd;						  // congestion window(based on timeout, acks, etc.)
+	int s_rwnd;						  // what receiver says window should be window 
+	int s_dup_acks;					  // currently recovering from dup acks
+	int s_dup_ack_count;			  // keeps track of how many duplicate acks so far 
+	int s_dup_acks_reset;			  // dup ack discovered
+	int s_timeout;					  // currently recovering from time out
+	int s_timeout_reset;				  // time out discovered
 	int send_eof;                // 1 if we have sent eof
 
 	// receiver's view
 	uint32_t r_next_exp_seq;            // seqno of next expected packet
 	uint32_t r_to_print_pkt_seq;        // when rel_output is called this is the pkt it tries to grab from in_pkt_list
+	int r_rwnd;							// receiver calculates to send in an ack to sender 
 	int recv_eof;                  // 1 if we have received eof
 
 	// Copied from config_common
@@ -40,7 +49,7 @@ struct reliable_state {
 	int timeout;            // Retransmission timeout in milliseconds
 
 	//congestion control 
-	int ssthresh; 		// slow start threshold 
+	int s_ssthresh; 		// slow start threshold 
 };
 rel_t *rel_list;
 
@@ -83,7 +92,7 @@ void send_ack(rel_t* r) {
 	sent_ack.cksum = 0x0000;
 	sent_ack.len = htons(ACK_SIZE);
 	sent_ack.ackno = htonl(r->r_next_exp_seq);
-	sent_ack.rwnd = 0;//TODO
+	sent_ack.rwnd = htonl(conn_bufspace(r->c));//TODO
 	sent_ack.cksum = cksum ((void*) &sent_ack, ACK_SIZE);
 
 	//Send ack
@@ -117,6 +126,7 @@ void add_to_out_list(rel_t* r, packet_t *pkt, uint32_t seqno, size_t size, struc
 	to_add->next = NULL;
 	to_add->last_try = timespec;
 
+
 	//Add to out list
 	if (out_list_head == NULL) {
 		out_list_head = to_add;
@@ -137,7 +147,7 @@ void send_eof(rel_t* s) {
 		to_send->ackno = htonl(s->r_next_exp_seq);
 		to_send->seqno = htonl(s->s_next_out_pkt_seq);
 		to_send->len = htons(HEADER_SIZE);
-		to_send->rwnd = htonl(0);//TODO
+		to_send->rwnd = htonl(conn_bufspace(s->c));//TODO
 		to_send->cksum = cksum ((void*) to_send, HEADER_SIZE);
 
 		//Send and add to list
@@ -223,14 +233,22 @@ rel_create (conn_t *c, const struct sockaddr_storage *ss,
 	r->s_next_out_pkt_seq = 1;
 	r->s_last_ack_recvd = 1;
 	r->send_eof = 0;
+	r->s_cwnd = 1;
+	r->s_ssthresh = cc->window;
+	r->s_timeout = 0;
+	r->s_timeout_reset = 0;
+	r->s_dup_acks = 0;
+	r->s_dup_acks_reset = 0;
+	r->s_dup_ack_count = 0;
 
 	// receiver's view
 	r->r_next_exp_seq = 1;
 	r->r_to_print_pkt_seq = 1;
 	r->recv_eof = 0;
+	r->r_rwnd = 1; //TODO: replace with calcultion using conn_buffer 
 
 	// Copied from config_common
-	r->window = cc->window;
+	r->window = min(r->s_cwnd, r->s_rwnd);
 	r->timeout = cc->timeout;
 
 	//Send eof at beginning if RECEIVER
@@ -259,6 +277,35 @@ rel_demux (const struct config_common *cc,
 	//leave it blank here!!!
 }
 
+
+void 
+update_window_size (rel_t *r) {
+
+	if (r->s_dup_acks == 1) {
+		if (r->s_dup_acks_reset == 1) {
+			r->s_ssthresh = r->s_cwnd/2;
+			r->s_cwnd = r->s_ssthresh;
+			r->s_dup_acks_reset = 0;
+		} else {
+			r->s_cwnd += MSS;
+		}
+		
+	} else if (r->s_timeout == 1) {
+		if (r->s_timeout_reset == 1) {
+			r->s_cwnd = MSS;
+			r->s_ssthresh = r->s_cwnd/2;
+			r->s_timeout_reset = 0;
+		} else if (r->s_ssthresh > r->s_cwnd) {
+			r->s_cwnd *= 2; 		//slow start 
+		} else {
+			r->s_cwnd+= MSS; 		//AIMD
+		}
+
+	}
+	r->window = min(r->s_cwnd, r->s_rwnd);
+}
+
+
 // Process a received packet
 void
 rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
@@ -274,8 +321,21 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 
 	// Update s_last_ack_recvd for sender state
 	if (ntohl(pkt->ackno) > r->s_last_ack_recvd && ntohl(pkt->ackno) <= r->s_next_out_pkt_seq){
+		if (r->s_last_ack_recvd == ntohl(pkt->ackno)) { //check for dup acks 
+			r->s_dup_ack_count++;
+			if (r->s_dup_ack_count == 3) {
+				r->s_dup_acks_reset = 1;
+				r->s_dup_ack_count = 0;
+				r->s_dup_acks = 1; 
+			}
+		} else {
+			r->s_dup_ack_count = 0; 
+		}
 		r->s_last_ack_recvd = ntohl(pkt->ackno);
 	}
+	
+	//update window size
+	update_window_size(r);
 
 	// Received data packet
 	if (n >= HEADER_SIZE && ntohs(pkt->len) >= HEADER_SIZE && ntohl(pkt->seqno) == r->r_next_exp_seq) {
@@ -299,26 +359,10 @@ rel_recvpkt (rel_t *r, packet_t *pkt, size_t n)
 			send_ack(r);
 		}
 
+
 		// Try to output
 		rel_output(r);
 	}
-}
-
-uint32_t 
-reno (rel_t *r) {
-
-	//slow start	
-	if (r->ssthresh > r->window) {
-		r->window *= 2; 		//slow start 
-	} else {
-		r->window += 1; 		//AIMD
-	}
-
-	return r->window;
-	//aimd
-
-	//need to change ssthresh value at some point 
-
 }
 
 void
@@ -422,6 +466,9 @@ rel_timer () {
 		{
 			conn_sendpkt (temp->r->c, temp->pkt, temp->size);
 			clock_gettime(CLOCK_MONOTONIC, temp->last_try);
+			temp->r->s_timeout_reset = 1;
+			temp->r->s_timeout = 1;
+			update_window_size(temp->r);
 		}
 		temp = temp->next;
 	}
